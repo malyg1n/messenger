@@ -1,78 +1,79 @@
 services:
-  
-  frontend:
-    image: node:24
-    working_dir: /app
-    volumes:
-      - ./frontend:/app
-    command: sh -c "npm install && npm run dev -- --host"
-    ports:
-      - "5173:5173"
 
   postgres:
-    image: postgres:17
+    image: postgres:16
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: chat
     ports:
       - "5432:5432"
     volumes:
+      - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
-
 
   kafka:
     image: redpandadata/redpanda:v24.1.2
-    container_name: kafka
     command:
       - redpanda
       - start
       - --overprovisioned
-      - --smp 1
-      - --memory 512M
-      - --reserve-memory 0M
-      - --node-id 0
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://kafka:9092
       - --check=false
-
     ports:
       - "9092:9092"
-    healthcheck:
-      test: ["CMD-SHELL", "rpk cluster info"]
-      interval: 5s
-      retries: 10
+    volumes:
+      - kafka_data:/var/lib/redpanda/data
 
   api:
-    image: golang:1.25
-    working_dir: /app
-
+    build: ./api-service
     volumes:
       - ./api-service:/app
-    command: sh -c "go install github.com/air-verse/air@latest && air -c .air.toml"
+      - go_mod_cache:/go/pkg/mod
     ports:
       - "8081:8081"
     depends_on:
       - postgres
 
-
   ws:
-    image: golang:1.25
-    working_dir: /app
+    build: ./ws-service
     volumes:
       - ./ws-service:/app
-    environment:
-      APP_ENV: dev
-    command: sh -c "go install github.com/air-verse/air@latest && air -c .air.toml"
+      - go_mod_cache:/go/pkg/mod
     ports:
       - "8080:8080"
     depends_on:
       - kafka
 
-
-  msg:
-    image: golang:1.25
-    working_dir: /app
+  message:
+    build: ./message-service
     volumes:
       - ./message-service:/app
-    command: sh -c "go install github.com/air-verse/air@latest && air -c .air.toml"
+      - go_mod_cache:/go/pkg/mod
     depends_on:
       - kafka
       - postgres
+
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./frontend:/app
+      - node_modules_cache:/app/node_modules
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres_data:
+  kafka_data:
+  node_modules_cache:
+  go_mod_cache:

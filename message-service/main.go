@@ -13,14 +13,13 @@ import (
 )
 
 type ChatMessage struct {
+	ChatID   string `json:"chat_id"`
 	SenderID string `json:"sender_id"`
-
-	ReceiverID string `json:"receiver_id"`
-
-	Body string `json:"body"`
+	Body     string `json:"body"`
 }
 
 func main() {
+	log.Println("Starting message service")
 	db, err := sql.Open(
 		"postgres",
 		"postgres://postgres:postgres@postgres:5432/chat?sslmode=disable",
@@ -43,17 +42,19 @@ func main() {
 
 		msg, err := reader.ReadMessage(context.Background())
 		if err != nil {
+			log.Println("error reading message", err)
 			continue
 		}
 
 		var m ChatMessage
 
 		json.Unmarshal(msg.Value, &m)
+		log.Println("message", m)
 
-		db.Exec(`insert into messages (id, sender_id, receiver_id, body) values ($1,$2,$3,$4)`,
+		db.Exec(`insert into messages (id, sender_id, chat_id, body) values ($1,$2,$3,$4)`,
 			uuid.New(),
 			m.SenderID,
-			m.ReceiverID,
+			m.ChatID,
 			m.Body,
 		)
 

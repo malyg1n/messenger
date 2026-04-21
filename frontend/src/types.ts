@@ -5,6 +5,10 @@ export type User = {
 
 export type ChatMessage = {
 	sender_id: string
-	receiver_id: string
+	chat_id: string
 	body: string
+}
+
+export type Chat = {
+	id: string
 }
