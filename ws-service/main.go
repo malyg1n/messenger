@@ -54,7 +54,7 @@ func main() {
 		"postgres",
 		"postgres://postgres:postgres@postgres:5432/chat?sslmode=disable",
 	)
-	
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,9 +88,13 @@ func main() {
 				break
 			}
 
+			var m ChatMessage
+			json.Unmarshal(msg, &m)
+
 			writer.WriteMessages(
 				context.Background(),
 				kafka.Message{
+					Key:   []byte(m.ChatID),
 					Value: msg,
 				},
 			)
@@ -127,7 +131,7 @@ func consumeMessages(
 
 }
 
-func broadcast(db *sql.DB,m ChatMessage) {
+func broadcast(db *sql.DB, m ChatMessage) {
 
 	connections.RLock()
 
@@ -137,17 +141,17 @@ func broadcast(db *sql.DB,m ChatMessage) {
 		db,
 		m.ChatID,
 	)
-	
+
 	for _, uid := range users {
-	
+
 		conn, ok := connections.m[uid]
-	
+
 		if ok {
-	
+
 			conn.WriteJSON(m)
-	
+
 		}
-	
+
 	}
 
 }

@@ -1,4 +1,4 @@
-import { User } from "../types"
+import { Chat, User } from "../types"
 
 const API = "http://localhost:8081"
 
@@ -63,12 +63,19 @@ async function login(username: string): Promise<User> {
 
 }
 
-async function getMessages(chatId: string) {
+async function getMessages(chatId: string, limit = 50) {
 
 	const res = await fetch(
-		API + "/messages?chat_id=" + chatId
+		API + "/messages?chat_id=" + chatId + "&limit=" + limit
 	)
 
+	return res.json()
+
+}
+
+async function getChats(userId: string): Promise<Chat[]> {
+
+	const res = await fetch(API + "/chats?user_id=" + userId)
 	return res.json()
 
 }
@@ -78,5 +85,6 @@ export default {
 	getUsers,
     createDirectChat,
 	login,
-	getMessages
+	getMessages,
+	getChats
 }

@@ -10,5 +10,8 @@ export type ChatMessage = {
 }
 
 export type Chat = {
-	id: string
+	chat_id: string
+	title: string
+	last_message: string
+	last_message_at: string
 }

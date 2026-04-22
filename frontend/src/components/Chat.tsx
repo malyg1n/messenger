@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { ChatMessage, User } from "../types"
+import { useEffect, useRef, useState } from "react"
+import { Chat as ChatItem, ChatMessage, User } from "../types"
 import UsersList from "./UsersList"
 import api from "../api/client"
 
@@ -7,23 +7,110 @@ type Props = {
 	user: User
 }
 
+type ViewMessage = {
+	text: string
+	isMe: boolean
+	timestamp: string
+	createdAtMs: number
+}
+
+const PAGE_SIZE = 50
+
 export default function Chat({ user }: Props) {
 
 	const [chatId, setChatId] = useState<string | null>(null)
-	const [selectedUser, setSelectedUser] = useState<User | null>(null)
+	const [selectedChat, setSelectedChat] = useState<ChatItem | null>(null)
 	const [text, setText] = useState("")
-	const [messages, setMessages] = useState<string[]>([])
+	const [messages, setMessages] = useState<ViewMessage[]>([])
 	const [socket, setSocket] = useState<WebSocket | null>(null)
+	const [chatsRefreshToken, setChatsRefreshToken] = useState(0)
+	const [messagesLimit, setMessagesLimit] = useState(PAGE_SIZE)
+	const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+	const [hasMoreOlder, setHasMoreOlder] = useState(true)
+	const messagesRef = useRef<HTMLDivElement | null>(null)
+	const selectedChatRef = useRef<ChatItem | null>(null)
+
+	function formatTimestamp(value?: string) {
+		const date = value ? new Date(value) : new Date()
+		if (Number.isNaN(date.getTime())) {
+			return new Date().toLocaleString("ru-RU", {
+				day: "2-digit",
+				month: "2-digit",
+				hour: "2-digit",
+				minute: "2-digit"
+			})
+		}
+
+		return date.toLocaleString("ru-RU", {
+			day: "2-digit",
+			month: "2-digit",
+			hour: "2-digit",
+			minute: "2-digit"
+		})
+	}
+
+	function toCreatedAtMs(value?: string) {
+		const parsed = value ? new Date(value).getTime() : Date.now()
+		return Number.isNaN(parsed) ? Date.now() : parsed
+	}
+
+	function toViewMessages(history: { sender_id: string; body: string; created_at?: string }[], chat: ChatItem) {
+		return history
+			.map(m => ({
+				text: m.sender_id === user.id ? "me: " + m.body : chat.title + ": " + m.body,
+				isMe: m.sender_id === user.id,
+				timestamp: formatTimestamp(m.created_at),
+				createdAtMs: toCreatedAtMs(m.created_at)
+			}))
+			.sort((a, b) => a.createdAtMs - b.createdAtMs)
+	}
+
+	function scrollToBottom() {
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				const container = messagesRef.current
+				if (!container) return
+				container.scrollTop = container.scrollHeight
+			})
+		})
+	}
+
+	async function loadHistory(targetChatId: string, chat: ChatItem, limit: number, preserveScroll = false) {
+		const container = messagesRef.current
+		const prevScrollTop = container?.scrollTop ?? 0
+		const prevScrollHeight = container?.scrollHeight ?? 0
+		const history = await api.getMessages(targetChatId, limit)
+		setMessages(toViewMessages(history ?? [], chat))
+		setHasMoreOlder((history?.length ?? 0) >= limit)
+
+		requestAnimationFrame(() => {
+			const current = messagesRef.current
+			if (!current) return
+			if (preserveScroll) {
+				const newScrollHeight = current.scrollHeight
+				current.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight)
+				return
+			}
+			scrollToBottom()
+		})
+	}
 
 	useEffect(() => {
 		const ws = new WebSocket(`ws://localhost:8080/ws?user_id=${user.id}`)
 		ws.onmessage = e => {
-			const m = JSON.parse(e.data)
+			const m = JSON.parse(e.data) as { sender_id: string; body: string; created_at?: string }
 			if (m.sender_id !== user.id) {
 				setMessages(prev => [
 					...prev,
-					"them: " + m.body
+					{
+						text: "them: " + m.body,
+						isMe: false,
+						timestamp: formatTimestamp(m.created_at),
+						createdAtMs: toCreatedAtMs(m.created_at)
+					}
 				])
+				setChatsRefreshToken(prev => prev + 1)
+				scrollToBottom()
 			}
 		}
 
@@ -33,7 +120,7 @@ export default function Chat({ user }: Props) {
 
 	function send() {
 
-		if (!socket || !chatId) return
+		if (!socket || !chatId || !text.trim()) return
 
 		const msg: ChatMessage = {
 
@@ -47,84 +134,102 @@ export default function Chat({ user }: Props) {
 
 		setMessages(prev => [
 			...prev,
-			"me: " + text
+			{
+				text: "me: " + text,
+				isMe: true,
+				timestamp: formatTimestamp(),
+				createdAtMs: Date.now()
+			}
 		])
 
 		setText("")
+		scrollToBottom()
 
 	}
 
-	async function selectUser(u: User) {
+	async function selectChat(chat: ChatItem) {
 
-		setSelectedUser(u)
-	
-		const res = await api.createDirectChat(
-			user.id,
-			u.id
-		)
-	
-		setChatId(res.chat_id)
-	
-		const history = await api.getMessages(
-			res.chat_id
-		)
+		setSelectedChat(chat)
+		selectedChatRef.current = chat
 		setMessages([])
-		if (!history || !history.length) {
-			return
+		setMessagesLimit(PAGE_SIZE)
+		setHasMoreOlder(true)
+
+		setChatId(chat.chat_id)
+		await loadHistory(chat.chat_id, chat, PAGE_SIZE)
+		scrollToBottom()
+	
+	}
+
+	async function handleMessagesScroll() {
+		const container = messagesRef.current
+		if (!container || !chatId || !selectedChatRef.current) return
+		if (isLoadingOlder || !hasMoreOlder) return
+		if (container.scrollTop > 40) return
+
+		setIsLoadingOlder(true)
+		const nextLimit = messagesLimit + PAGE_SIZE
+		setMessagesLimit(nextLimit)
+
+		try {
+			await loadHistory(chatId, selectedChatRef.current, nextLimit, true)
+		} finally {
+			setIsLoadingOlder(false)
 		}
-	
-		setMessages(
-			history.map(
-				(				m: { sender_id: string; body: string }) =>
-					m.sender_id === user.id
-						? "me: " + m.body
-						: u.username + ": " + m.body
-			)
-		)
-	
 	}
 
 	return (
-
-		<div style={{ display: "flex", gap: 20 }}>
-
+		<div className="chat-shell">
 			<UsersList
 				currentUser={user}
-				onSelect={selectUser}
+				onSelect={selectChat}
+				selectedChatId={selectedChat?.chat_id}
+				refreshToken={chatsRefreshToken}
 			/>
 
-			<div style={{ flex: 1 }}>
-
-				<h3>
-					user: {user.username}
-				</h3>
-
-				<div>
-					chat with:
-					{selectedUser?.username}
+			<div className="chat-main">
+				<div className="chat-topbar">
+					<div className="chat-topbar-title">
+						{selectedChat?.title ?? "Выберите чат"}
+					</div>
+					<div className="chat-topbar-subtitle">Вы: {user.username}</div>
 				</div>
 
-				<div className="messages">
-
+				<div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
 					{messages.map((m, i) => (
-						<div key={i}>{m}</div>
+						<div
+							key={i}
+							className={`message-row ${m.isMe ? "message-row-me" : "message-row-them"}`}
+						>
+							<div className={`message-bubble ${m.isMe ? "message-bubble-me" : "message-bubble-them"}`}>
+								<div>{m.text}</div>
+								<div className="message-meta">{m.timestamp}</div>
+							</div>
+						</div>
 					))}
-
+					{isLoadingOlder ? <div className="messages-status">Загружаем более старые сообщения...</div> : null}
 				</div>
 
-				<input
-					value={text}
-					onChange={e => setText(e.target.value)}
-				/>
+				<div className="chat-input-row">
+					<input
+						className="chat-input"
+						value={text}
+						onChange={e => setText(e.target.value)}
+						onKeyDown={e => {
+							if (e.key === "Enter") {
+								send()
+							}
+						}}
+						placeholder={selectedChat ? "Введите сообщение..." : "Сначала выберите чат"}
+						disabled={!selectedChat}
+					/>
 
-				<button onClick={send}>
-					send
-				</button>
-
+					<button className="btn btn-primary" onClick={send} disabled={!selectedChat}>
+						Отправить
+					</button>
+				</div>
 			</div>
-
 		</div>
-
 	)
 
 }

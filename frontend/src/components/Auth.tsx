@@ -55,35 +55,30 @@ export default function Auth({ onAuth }: Props) {
 	}
 
 	return (
+		<div className="auth-shell">
+			<div className="auth-card">
+				<h1 className="auth-title">Messenger</h1>
+				<p className="auth-subtitle">Вход или регистрация</p>
 
-		<div>
+				<input
+					className="auth-input"
+					placeholder="username"
+					value={username}
+					onChange={e => setUsername(e.target.value)}
+				/>
 
-			<h2>Login</h2>
+				<div className="auth-actions">
+					<button className="btn btn-primary" onClick={handleLogin}>
+						Войти
+					</button>
 
-			<input
+					<button className="btn btn-secondary" onClick={handleRegister}>
+						Регистрация
+					</button>
+				</div>
 
-				placeholder="username"
-
-				value={username}
-
-				onChange={e => setUsername(e.target.value)}
-
-			/>
-
-			<div>
-
-				<button onClick={handleLogin}>
-					login
-				</button>
-
-				<button onClick={handleRegister}>
-					register
-				</button>
-
+				{error ? <div className="auth-error">{error}</div> : null}
 			</div>
-
-			<div>{error}</div>
-
 		</div>
 
 	)
