@@ -47,6 +47,8 @@ services:
 
   ws:
     build: ./ws-service
+    env_file:
+      - ./ws-service/.env
     volumes:
       - ./ws-service:/app
       - go_mod_cache:/go/pkg/mod
