@@ -5,3 +5,4 @@ vendor
 kafka_data
 tmp
 dist
+.env
