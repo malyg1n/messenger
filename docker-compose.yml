@@ -59,6 +59,8 @@ services:
 
   message:
     build: ./message-service
+    env_file:
+      - ./message-service/.env
     volumes:
       - ./message-service:/app
       - go_mod_cache:/go/pkg/mod

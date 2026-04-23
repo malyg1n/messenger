@@ -7,9 +7,16 @@ type Props = {
 	onSelect: (chat: Chat) => void
 	selectedChatId?: string
 	refreshToken?: number
+	lastMessageOverrides?: Record<string, { last_message: string; last_message_at: string }>
 }
 
-export default function UsersList({ currentUser, onSelect, selectedChatId, refreshToken = 0 }: Props) {
+export default function UsersList({
+	currentUser,
+	onSelect,
+	selectedChatId,
+	refreshToken = 0,
+	lastMessageOverrides = {}
+}: Props) {
 	const [chats, setChats] = useState<Chat[]>([])
 	const [users, setUsers] = useState<User[]>([])
 
@@ -25,9 +32,28 @@ export default function UsersList({ currentUser, onSelect, selectedChatId, refre
 		})
 	}
 
+	function toTimeMs(value?: string) {
+		if (!value) return 0
+		const parsed = new Date(value).getTime()
+		return Number.isNaN(parsed) ? 0 : parsed
+	}
+
 	useEffect(() => {
-		api.getChats(currentUser.id).then(setChats)
-		api.getUsers().then(setUsers)
+		let isActive = true
+
+		api.getChats(currentUser.id).then(nextChats => {
+			if (!isActive) return
+			setChats(nextChats)
+		})
+
+		api.getUsers().then(nextUsers => {
+			if (!isActive) return
+			setUsers(nextUsers)
+		})
+
+		return () => {
+			isActive = false
+		}
 	}, [currentUser.id, refreshToken])
 
 	async function startChatWithUser(target: User) {
@@ -55,11 +81,26 @@ export default function UsersList({ currentUser, onSelect, selectedChatId, refre
 		return !chats.some(chat => chat.title === u.username)
 	})
 
+	const chatsForRender = chats
+		.map(chat => {
+			const override = lastMessageOverrides[chat.chat_id]
+			if (!override) return chat
+			const overrideTime = toTimeMs(override.last_message_at)
+			const chatTime = toTimeMs(chat.last_message_at)
+			if (overrideTime < chatTime) return chat
+			return {
+				...chat,
+				last_message: override.last_message,
+				last_message_at: override.last_message_at
+			}
+		})
+		.sort((a, b) => toTimeMs(b.last_message_at) - toTimeMs(a.last_message_at))
+
 	return (
 		<div className="chat-sidebar">
 			<div className="sidebar-title">Чаты</div>
 
-			{chats.map(chat => (
+			{chatsForRender.map(chat => (
 					<div
 						key={chat.chat_id}
 						onClick={() => onSelect(chat)}

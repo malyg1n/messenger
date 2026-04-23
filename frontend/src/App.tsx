@@ -7,6 +7,11 @@ export default function App() {
 
 	const [user, setUser] = useState<User | null>(null)
 
+	function handleLogout() {
+		localStorage.clear()
+		setUser(null)
+	}
+
 	useEffect(() => {
 
 		const saved = localStorage.getItem("user")
@@ -25,6 +30,6 @@ export default function App() {
 
 	}
 
-	return <Chat user={user} />
+	return <Chat user={user} onLogout={handleLogout} />
 
 }

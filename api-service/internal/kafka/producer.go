@@ -20,10 +20,11 @@ type WriterProducer struct {
 func NewWriterProducer(brokers []string, clientID string) *WriterProducer {
 	return &WriterProducer{
 		writer: &kafkago.Writer{
-			Addr:         kafkago.TCP(brokers...),
-			Balancer:     &kafkago.Hash{},
-			RequiredAcks: kafkago.RequireAll,
-			Async:        false,
+			Addr:                   kafkago.TCP(brokers...),
+			Balancer:               &kafkago.Hash{},
+			RequiredAcks:           kafkago.RequireAll,
+			Async:                  false,
+			AllowAutoTopicCreation: true,
 			Transport: &kafkago.Transport{
 				ClientID: clientID,
 			},

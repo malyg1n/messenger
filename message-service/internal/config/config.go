@@ -1,0 +1,106 @@
+package config
+
+import (
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/joho/godotenv"
+)
+
+type Config struct {
+	PostgresDSN   string
+	KafkaBrokers  []string
+	KafkaTopic    string
+	KafkaGroupID  string
+	LogLevel      slog.Level
+	LoadedEnvFile string
+}
+
+func Load() (Config, error) {
+	loadedEnvFile := loadDotEnv()
+
+	cfg := Config{
+		PostgresDSN:   os.Getenv("POSTGRES_DSN"),
+		KafkaTopic:    os.Getenv("KAFKA_TOPIC"),
+		KafkaGroupID:  os.Getenv("KAFKA_GROUP_ID"),
+		LoadedEnvFile: loadedEnvFile,
+	}
+
+	brokersRaw := os.Getenv("KAFKA_BROKERS")
+	if brokersRaw != "" {
+		parts := strings.Split(brokersRaw, ",")
+		cfg.KafkaBrokers = make([]string, 0, len(parts))
+		for _, part := range parts {
+			broker := strings.TrimSpace(part)
+			if broker != "" {
+				cfg.KafkaBrokers = append(cfg.KafkaBrokers, broker)
+			}
+		}
+	}
+
+	level, err := parseLogLevel(os.Getenv("LOG_LEVEL"))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.LogLevel = level
+
+	if err := validate(cfg); err != nil {
+		return Config{}, err
+	}
+
+	return cfg, nil
+}
+
+func loadDotEnv() string {
+	candidates := []string{
+		".env",
+		filepath.Join("message-service", ".env"),
+	}
+	for _, path := range candidates {
+		if err := godotenv.Load(path); err == nil {
+			return path
+		}
+	}
+
+	return ""
+}
+
+func parseLogLevel(value string) (slog.Level, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("invalid LOG_LEVEL: %q", value)
+	}
+}
+
+func validate(cfg Config) error {
+	missing := make([]string, 0)
+	if cfg.PostgresDSN == "" {
+		missing = append(missing, "POSTGRES_DSN")
+	}
+	if len(cfg.KafkaBrokers) == 0 {
+		missing = append(missing, "KAFKA_BROKERS")
+	}
+	if cfg.KafkaTopic == "" {
+		missing = append(missing, "KAFKA_TOPIC")
+	}
+	if cfg.KafkaGroupID == "" {
+		missing = append(missing, "KAFKA_GROUP_ID")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))
+	}
+
+	return nil
+}

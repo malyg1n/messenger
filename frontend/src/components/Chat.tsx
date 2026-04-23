@@ -5,6 +5,7 @@ import api from "../api/client"
 
 type Props = {
 	user: User
+	onLogout: () => void
 }
 
 type ViewMessage = {
@@ -14,9 +15,14 @@ type ViewMessage = {
 	createdAtMs: number
 }
 
+type LastMessageOverride = {
+	last_message: string
+	last_message_at: string
+}
+
 const PAGE_SIZE = 50
 
-export default function Chat({ user }: Props) {
+export default function Chat({ user, onLogout }: Props) {
 
 	const [chatId, setChatId] = useState<string | null>(null)
 	const [selectedChat, setSelectedChat] = useState<ChatItem | null>(null)
@@ -27,8 +33,10 @@ export default function Chat({ user }: Props) {
 	const [messagesLimit, setMessagesLimit] = useState(PAGE_SIZE)
 	const [isLoadingOlder, setIsLoadingOlder] = useState(false)
 	const [hasMoreOlder, setHasMoreOlder] = useState(true)
+	const [lastMessageOverrides, setLastMessageOverrides] = useState<Record<string, LastMessageOverride>>({})
 	const messagesRef = useRef<HTMLDivElement | null>(null)
 	const selectedChatRef = useRef<ChatItem | null>(null)
+	const selectedChatIdRef = useRef<string | null>(null)
 
 	function formatTimestamp(value?: string) {
 		const date = value ? new Date(value) : new Date()
@@ -98,19 +106,31 @@ export default function Chat({ user }: Props) {
 	useEffect(() => {
 		const ws = new WebSocket(`ws://localhost:8080/ws?user_id=${user.id}`)
 		ws.onmessage = e => {
-			const m = JSON.parse(e.data) as { sender_id: string; body: string; created_at?: string }
-			if (m.sender_id !== user.id) {
+			const m = JSON.parse(e.data) as { sender_id: string; chat_id: string; body: string; created_at?: string }
+			const createdAt = m.created_at ?? new Date().toISOString()
+			if (m.chat_id) {
+				setLastMessageOverrides(prev => ({
+					...prev,
+					[m.chat_id]: {
+						last_message: m.body,
+						last_message_at: createdAt
+					}
+				}))
+			}
+			if (m.sender_id !== user.id && m.chat_id === selectedChatIdRef.current) {
 				setMessages(prev => [
 					...prev,
 					{
 						text: "them: " + m.body,
 						isMe: false,
-						timestamp: formatTimestamp(m.created_at),
-						createdAtMs: toCreatedAtMs(m.created_at)
+						timestamp: formatTimestamp(createdAt),
+						createdAtMs: toCreatedAtMs(createdAt)
 					}
 				])
-				setChatsRefreshToken(prev => prev + 1)
 				scrollToBottom()
+			}
+			if (m.sender_id !== user.id) {
+				setChatsRefreshToken(prev => prev + 1)
 			}
 		}
 
@@ -131,6 +151,14 @@ export default function Chat({ user }: Props) {
 		}
 
 		socket.send(JSON.stringify(msg))
+		setChatsRefreshToken(prev => prev + 1)
+		setLastMessageOverrides(prev => ({
+			...prev,
+			[chatId]: {
+				last_message: text,
+				last_message_at: new Date().toISOString()
+			}
+		}))
 
 		setMessages(prev => [
 			...prev,
@@ -156,6 +184,7 @@ export default function Chat({ user }: Props) {
 		setHasMoreOlder(true)
 
 		setChatId(chat.chat_id)
+		selectedChatIdRef.current = chat.chat_id
 		await loadHistory(chat.chat_id, chat, PAGE_SIZE)
 		scrollToBottom()
 	
@@ -185,49 +214,62 @@ export default function Chat({ user }: Props) {
 				onSelect={selectChat}
 				selectedChatId={selectedChat?.chat_id}
 				refreshToken={chatsRefreshToken}
+				lastMessageOverrides={lastMessageOverrides}
 			/>
 
 			<div className="chat-main">
 				<div className="chat-topbar">
-					<div className="chat-topbar-title">
-						{selectedChat?.title ?? "Выберите чат"}
+					<div className="chat-topbar-header">
+						<div className="chat-topbar-title">
+							{selectedChat?.title ?? "Выберите чат"}
+						</div>
+						<button className="btn btn-secondary chat-logout-btn" onClick={onLogout}>
+							Выйти
+						</button>
 					</div>
 					<div className="chat-topbar-subtitle">Вы: {user.username}</div>
 				</div>
 
-				<div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
-					{messages.map((m, i) => (
-						<div
-							key={i}
-							className={`message-row ${m.isMe ? "message-row-me" : "message-row-them"}`}
-						>
-							<div className={`message-bubble ${m.isMe ? "message-bubble-me" : "message-bubble-them"}`}>
-								<div>{m.text}</div>
-								<div className="message-meta">{m.timestamp}</div>
-							</div>
+				{selectedChat ? (
+					<>
+						<div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
+							{messages.map((m, i) => (
+								<div
+									key={i}
+									className={`message-row ${m.isMe ? "message-row-me" : "message-row-them"}`}
+								>
+									<div className={`message-bubble ${m.isMe ? "message-bubble-me" : "message-bubble-them"}`}>
+										<div>{m.text}</div>
+										<div className="message-meta">{m.timestamp}</div>
+									</div>
+								</div>
+							))}
+							{isLoadingOlder ? <div className="messages-status">Загружаем более старые сообщения...</div> : null}
 						</div>
-					))}
-					{isLoadingOlder ? <div className="messages-status">Загружаем более старые сообщения...</div> : null}
-				</div>
 
-				<div className="chat-input-row">
-					<input
-						className="chat-input"
-						value={text}
-						onChange={e => setText(e.target.value)}
-						onKeyDown={e => {
-							if (e.key === "Enter") {
-								send()
-							}
-						}}
-						placeholder={selectedChat ? "Введите сообщение..." : "Сначала выберите чат"}
-						disabled={!selectedChat}
-					/>
+						<div className="chat-input-row">
+							<input
+								className="chat-input"
+								value={text}
+								onChange={e => setText(e.target.value)}
+								onKeyDown={e => {
+									if (e.key === "Enter") {
+										send()
+									}
+								}}
+								placeholder="Введите сообщение..."
+							/>
 
-					<button className="btn btn-primary" onClick={send} disabled={!selectedChat}>
-						Отправить
-					</button>
-				</div>
+							<button className="btn btn-primary" onClick={send}>
+								Отправить
+							</button>
+						</div>
+					</>
+				) : (
+					<div className="chat-empty-state">
+						Выберите чат в списке слева, чтобы открыть переписку
+					</div>
+				)}
 			</div>
 		</div>
 	)
