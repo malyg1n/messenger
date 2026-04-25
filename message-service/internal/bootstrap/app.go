@@ -27,6 +27,11 @@ var (
 	ErrKafkaUnavailable = errors.New("kafka brokers are unavailable")
 )
 
+const (
+	httpShutdownTimeout = 5 * time.Second
+	consumerStopTimeout = 30 * time.Second
+)
+
 // App хранит инфраструктурные зависимости message-service.
 type App struct {
 	Config       config.Config
@@ -39,7 +44,7 @@ type App struct {
 }
 
 // Build собирает конфиг, инфраструктуру Kafka/Postgres и runtime-объекты сервиса.
-func Build() (*App, error) {
+func Build(ctx context.Context) (*App, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -52,7 +57,7 @@ func Build() (*App, error) {
 		logger.Debug("dotenv file not found, using process env only", "component", "bootstrap", "operation", "config.load_dotenv")
 	}
 
-	db, err := initDB(cfg)
+	db, err := initDB(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +95,9 @@ func Build() (*App, error) {
 
 // Run параллельно запускает probe-сервер и Kafka-consumer, завершаясь по контексту.
 func (a *App) Run(ctx context.Context) error {
+	runCtx, stopConsumer := context.WithCancel(ctx)
+	defer stopConsumer()
+
 	serverErrCh := make(chan error, 1)
 	go func() {
 		if err := a.HTTPServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -101,33 +109,75 @@ func (a *App) Run(ctx context.Context) error {
 
 	consumerErrCh := make(chan error, 1)
 	go func() {
-		if err := a.KafkaConsume.Run(ctx); err != nil {
+		if err := a.KafkaConsume.Run(runCtx); err != nil {
 			consumerErrCh <- fmt.Errorf("run kafka consumer: %w", err)
 			return
 		}
 		consumerErrCh <- nil
 	}()
 
-	select {
-	case err := <-serverErrCh:
-		return err
-	case err := <-consumerErrCh:
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownHTTP := func() error {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 		defer cancel()
-
 		if err := a.HTTPServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("shutdown http probe server: %w", err)
 		}
 		return nil
 	}
+
+	waitConsumer := func() error {
+		select {
+		case err := <-consumerErrCh:
+			return err
+		case <-time.After(consumerStopTimeout):
+			a.Logger.Warn(
+				"kafka consumer did not stop in time; closing reader in Close may unblock it",
+				"component", "bootstrap",
+				"operation", "run.wait_consumer",
+				"timeout", consumerStopTimeout.String(),
+			)
+			return fmt.Errorf("kafka consumer stop timeout after %s", consumerStopTimeout)
+		}
+	}
+
+	select {
+	case err := <-serverErrCh:
+		stopConsumer()
+		if werr := waitConsumer(); werr != nil {
+			a.Logger.Error("consumer after http server error", "component", "bootstrap", "operation", "run.after_server_err", "error", werr)
+			if err != nil {
+				return errors.Join(err, werr)
+			}
+			return werr
+		}
+		return err
+
+	case err := <-consumerErrCh:
+		if shutdownErr := shutdownHTTP(); shutdownErr != nil {
+			if err != nil {
+				return errors.Join(err, shutdownErr)
+			}
+			return shutdownErr
+		}
+		return err
+
+	case <-ctx.Done():
+		stopConsumer()
+		consumerErr := waitConsumer()
+		if shutdownErr := shutdownHTTP(); shutdownErr != nil {
+			if consumerErr != nil {
+				return errors.Join(consumerErr, shutdownErr)
+			}
+			return shutdownErr
+		}
+		return consumerErr
+	}
 }
 
 // Close корректно закрывает HTTP-сервер, Kafka reader и соединение с БД.
-func (a *App) Close() {
+func (a *App) Close(ctx context.Context) {
 	if a.HTTPServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), httpShutdownTimeout)
 		defer cancel()
 		if err := a.HTTPServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			a.Logger.Error("failed to close http server", "component", "bootstrap", "operation", "close.http_server", "error", err)
@@ -151,13 +201,13 @@ func (a *App) Close() {
 }
 
 // initDB открывает подключение к Postgres и проверяет доступность БД.
-func initDB(cfg config.Config) (*sql.DB, error) {
+func initDB(ctx context.Context, cfg config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.PostgresDSN)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 
-	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
@@ -185,8 +235,8 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 
 // readyHandler проверяет доступность БД и Kafka-брокеров.
 func readyHandler(db *sql.DB, brokers []string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
 		if err := db.PingContext(ctx); err != nil {

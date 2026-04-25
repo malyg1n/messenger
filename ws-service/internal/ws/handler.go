@@ -6,12 +6,15 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"ws-service/internal/broker"
 	"ws-service/internal/model"
 )
+
+const kafkaPublishTimeout = 10 * time.Second
 
 // Handler обслуживает websocket-подключения и отправляет сообщения в Kafka.
 type Handler struct {
@@ -109,13 +112,16 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.producer.WriteMessage(context.Background(), []byte(msg.ChatID), payload); err != nil {
+		pubCtx, cancel := context.WithTimeout(r.Context(), kafkaPublishTimeout)
+		werr := h.producer.WriteMessage(pubCtx, []byte(msg.ChatID), payload)
+		cancel()
+		if werr != nil {
 			h.logger.Error("failed to publish message to kafka",
 				"component", "ws.handler",
 				"operation", "handle_ws.publish",
 				"user_id", userID,
 				"chat_id", msg.ChatID,
-				"error", err,
+				"error", werr,
 			)
 			continue
 		}

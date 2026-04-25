@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"ws-service/internal/broker"
@@ -30,6 +31,9 @@ type App struct {
 	KafkaConsumer broker.Consumer
 	HTTPServer    *http.Server
 	WSConsumer    *ws.Consumer
+	Hub           *ws.Hub
+
+	shutdownOnce sync.Once
 }
 
 // Build собирает все зависимости ws-service:
@@ -83,6 +87,7 @@ func Build() (*App, error) {
 		KafkaConsumer: consumer,
 		HTTPServer:    server,
 		WSConsumer:    wsConsumer,
+		Hub:           hub,
 	}, nil
 }
 
@@ -91,23 +96,33 @@ func (a *App) RunConsumer(ctx context.Context) {
 	a.WSConsumer.Run(ctx)
 }
 
-// Close закрывает producer/consumer Kafka и соединение с БД.
+// Shutdown выполняет упорядоченное завершение: Hub, Kafka reader, Kafka writer, DB (идемпотентно).
+func (a *App) Shutdown() {
+	a.shutdownOnce.Do(func() {
+		if a.Hub != nil {
+			a.Hub.Close()
+		}
+		if a.KafkaConsumer != nil {
+			if err := a.KafkaConsumer.Close(); err != nil {
+				a.Logger.Error("failed to close kafka consumer", "component", "bootstrap", "operation", "shutdown.kafka_consumer", "error", err)
+			}
+		}
+		if a.KafkaProducer != nil {
+			if err := a.KafkaProducer.Close(); err != nil {
+				a.Logger.Error("failed to close kafka producer", "component", "bootstrap", "operation", "shutdown.kafka_producer", "error", err)
+			}
+		}
+		if a.DB != nil {
+			if err := a.DB.Close(); err != nil {
+				a.Logger.Error("failed to close db", "component", "bootstrap", "operation", "shutdown.db", "error", err)
+			}
+		}
+	})
+}
+
+// Close — алиас для Shutdown (обратная совместимость).
 func (a *App) Close() {
-	if a.KafkaProducer != nil {
-		if err := a.KafkaProducer.Close(); err != nil {
-			a.Logger.Error("failed to close kafka producer", "component", "bootstrap", "operation", "close.kafka_producer", "error", err)
-		}
-	}
-	if a.KafkaConsumer != nil {
-		if err := a.KafkaConsumer.Close(); err != nil {
-			a.Logger.Error("failed to close kafka consumer", "component", "bootstrap", "operation", "close.kafka_consumer", "error", err)
-		}
-	}
-	if a.DB != nil {
-		if err := a.DB.Close(); err != nil {
-			a.Logger.Error("failed to close db", "component", "bootstrap", "operation", "close.db", "error", err)
-		}
-	}
+	a.Shutdown()
 }
 
 // initDB открывает подключение к Postgres и проверяет его доступность.
@@ -143,9 +158,9 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 
 // readyHandler проверяет доступность БД и Kafka producer/consumer.
 func readyHandler(db *sql.DB, producer broker.Producer, consumer broker.Consumer) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		// Проверки готовности должны быть быстрыми, чтобы не зависали пробы оркестратора.
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
 		if err := db.PingContext(ctx); err != nil {
