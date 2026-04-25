@@ -123,11 +123,12 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	chatID := r.URL.Query().Get("chat_id")
 	limit := r.URL.Query().Get("limit")
+	before := r.URL.Query().Get("before")
 	if limit == "" {
 		limit = "50"
 	}
 
-	messages, err := h.messageSvc.ListByChatID(r.Context(), chatID, limit)
+	messages, err := h.messageSvc.ListByChatID(r.Context(), chatID, before, limit)
 	if err != nil {
 		h.logger.Error("list messages failed", "component", "http.messages", "operation", "list", "chat_id", chatID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

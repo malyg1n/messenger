@@ -15,14 +15,15 @@ func NewMessageRepository(db *sql.DB) *MessageRepository {
 	return &MessageRepository{db: db}
 }
 
-func (r *MessageRepository) ListByChatID(ctx context.Context, chatID string, limit string) ([]model.Message, error) {
+func (r *MessageRepository) ListByChatID(ctx context.Context, chatID string, before string, limit string) ([]model.Message, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		select sender_id, body, created_at
 		from messages
 		where chat_id = $1
+		and ($2 = '' or created_at < $2::timestamp)
 		order by created_at desc
-		limit $2
-	`, chatID, limit)
+		limit $3
+	`, chatID, before, limit)
 	if err != nil {
 		return nil, err
 	}

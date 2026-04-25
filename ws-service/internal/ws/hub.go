@@ -25,6 +25,9 @@ func NewHub(logger *slog.Logger) *Hub {
 func (h *Hub) Register(userID string, conn *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if oldConn, ok := h.connections[userID]; ok {
+		oldConn.Close()
+	}
 	h.connections[userID] = conn
 }
 
@@ -35,15 +38,18 @@ func (h *Hub) Unregister(userID string) {
 }
 
 func (h *Hub) Broadcast(userIDs []string, msg model.ChatMessage) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	conns := make(map[string]*websocket.Conn)
 
+	h.mu.RLock()
 	for _, userID := range userIDs {
 		conn, ok := h.connections[userID]
-		if !ok {
-			continue
+		if ok {
+			conns[userID] = conn
 		}
+	}
+	h.mu.RUnlock()
 
+	for userID, conn := range conns {
 		if err := conn.WriteJSON(msg); err != nil {
 			h.logger.Error("failed to write websocket message",
 				"component", "ws.hub",

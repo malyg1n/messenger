@@ -15,6 +15,6 @@ func NewMessageService(messages *repository.MessageRepository) *MessageService {
 	return &MessageService{messages: messages}
 }
 
-func (s *MessageService) ListByChatID(ctx context.Context, chatID string, limit string) ([]model.Message, error) {
-	return s.messages.ListByChatID(ctx, chatID, limit)
+func (s *MessageService) ListByChatID(ctx context.Context, chatID string, before string, limit string) ([]model.Message, error) {
+	return s.messages.ListByChatID(ctx, chatID, before, limit)
 }
