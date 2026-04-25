@@ -18,13 +18,14 @@ var (
 
 // Config описывает настройки message-service, получаемые из окружения.
 type Config struct {
-	PostgresDSN   string
-	KafkaBrokers  []string
-	KafkaTopic    string
-	KafkaGroupID  string
-	ProbePort     string
-	LogLevel      slog.Level
-	LoadedEnvFile string
+	PostgresDSN        string
+	KafkaBrokers       []string
+	KafkaTopicIncoming string
+	KafkaTopicSaved    string
+	KafkaGroupID       string
+	ProbePort          string
+	LogLevel           slog.Level
+	LoadedEnvFile      string
 }
 
 // Load загружает переменные окружения, парсит лог-уровень и валидирует конфиг.
@@ -32,11 +33,12 @@ func Load() (Config, error) {
 	loadedEnvFile := loadDotEnv()
 
 	cfg := Config{
-		PostgresDSN:   os.Getenv("POSTGRES_DSN"),
-		KafkaTopic:    os.Getenv("KAFKA_TOPIC"),
-		KafkaGroupID:  os.Getenv("KAFKA_GROUP_ID"),
-		ProbePort:     os.Getenv("PROBE_PORT"),
-		LoadedEnvFile: loadedEnvFile,
+		PostgresDSN:        os.Getenv("POSTGRES_DSN"),
+		KafkaTopicIncoming: os.Getenv("KAFKA_TOPIC_MESSAGES_INCOMING"),
+		KafkaTopicSaved:    os.Getenv("KAFKA_TOPIC_MESSAGES_SAVED"),
+		KafkaGroupID:       os.Getenv("KAFKA_GROUP_ID"),
+		ProbePort:          os.Getenv("PROBE_PORT"),
+		LoadedEnvFile:      loadedEnvFile,
 	}
 
 	brokersRaw := os.Getenv("KAFKA_BROKERS")
@@ -105,8 +107,11 @@ func validate(cfg Config) error {
 	if len(cfg.KafkaBrokers) == 0 {
 		missing = append(missing, "KAFKA_BROKERS")
 	}
-	if cfg.KafkaTopic == "" {
-		missing = append(missing, "KAFKA_TOPIC")
+	if cfg.KafkaTopicIncoming == "" {
+		missing = append(missing, "KAFKA_TOPIC_MESSAGES_INCOMING")
+	}
+	if cfg.KafkaTopicSaved == "" {
+		missing = append(missing, "KAFKA_TOPIC_MESSAGES_SAVED")
 	}
 	if cfg.KafkaGroupID == "" {
 		missing = append(missing, "KAFKA_GROUP_ID")

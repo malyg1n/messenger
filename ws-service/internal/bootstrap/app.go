@@ -52,8 +52,8 @@ func Build() (*App, error) {
 		return nil, err
 	}
 
-	producer := broker.NewWriterProducer(cfg.KafkaBrokers, cfg.KafkaTopicMessage)
-	consumer := broker.NewReaderConsumer(cfg.KafkaBrokers, cfg.KafkaTopicMessage, cfg.KafkaGroupID)
+	producer := broker.NewWriterProducer(cfg.KafkaBrokers, cfg.KafkaTopicIncoming)
+	consumer := broker.NewReaderConsumer(cfg.KafkaBrokers, cfg.KafkaTopicSaved, cfg.KafkaGroupID)
 
 	// Сервис участников нужен Kafka-консьюмеру, чтобы определить,
 	// кому доставлять каждое сообщение чата в реальном времени.

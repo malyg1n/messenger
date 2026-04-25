@@ -36,7 +36,7 @@ func NewConsumer(
 // Run запускает непрерывный цикл: decode -> resolve participants -> broadcast.
 func (c *Consumer) Run(ctx context.Context) {
 	for {
-		// Читаем события из Kafka: это уже «принятые» сообщения от websocket-handler.
+		// Читаем события из Kafka: это уже сообщения, подтвержденные message-service после сохранения в БД.
 		msg, err := c.brokerConsumer.ReadMessage(ctx)
 		if err != nil {
 			c.logger.Error("failed to read kafka message",

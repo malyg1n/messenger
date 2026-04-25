@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"message-service/internal/broker"
 	"message-service/internal/config"
 	"message-service/internal/consumer"
 	"message-service/internal/repository"
@@ -32,6 +33,7 @@ type App struct {
 	Logger       *slog.Logger
 	DB           *sql.DB
 	KafkaReader  *kafka.Reader
+	KafkaWriter  *broker.Producer
 	KafkaConsume *consumer.KafkaConsumer
 	HTTPServer   *http.Server
 }
@@ -57,13 +59,14 @@ func Build() (*App, error) {
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: cfg.KafkaBrokers,
-		Topic:   cfg.KafkaTopic,
+		Topic:   cfg.KafkaTopicIncoming,
 		GroupID: cfg.KafkaGroupID,
 	})
+	writer := broker.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopicSaved)
 
 	messageRepo := repository.NewMessageRepository(db)
-	messageSvc := service.NewMessageService(messageRepo)
-	messageConsumer := consumer.NewKafkaConsumer(reader, messageSvc, logger, cfg.KafkaTopic)
+	messageSvc := service.NewMessageService(messageRepo, writer)
+	messageConsumer := consumer.NewKafkaConsumer(reader, messageSvc, logger, cfg.KafkaTopicIncoming)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -79,6 +82,7 @@ func Build() (*App, error) {
 		Logger:       logger,
 		DB:           db,
 		KafkaReader:  reader,
+		KafkaWriter:  writer,
 		KafkaConsume: messageConsumer,
 		HTTPServer:   httpServer,
 	}, nil
@@ -132,6 +136,11 @@ func (a *App) Close() {
 	if a.KafkaReader != nil {
 		if err := a.KafkaReader.Close(); err != nil {
 			a.Logger.Error("failed to close kafka reader", "component", "bootstrap", "operation", "close.kafka_reader", "error", err)
+		}
+	}
+	if a.KafkaWriter != nil {
+		if err := a.KafkaWriter.Close(); err != nil {
+			a.Logger.Error("failed to close kafka writer", "component", "bootstrap", "operation", "close.kafka_writer", "error", err)
 		}
 	}
 	if a.DB != nil {
