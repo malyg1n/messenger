@@ -15,15 +15,19 @@ type MessageService struct {
 	repo messageRepository
 }
 
+// NewMessageService создает сервис обработки входящих сообщений.
 func NewMessageService(repo messageRepository) *MessageService {
 	return &MessageService{repo: repo}
 }
 
+// Process валидирует и сохраняет сообщение, полученное из Kafka.
 func (s *MessageService) Process(ctx context.Context, message model.ChatMessage) error {
-	if message.ChatID == "" || message.SenderID == "" || message.Body == "" {
-		return fmt.Errorf("message contains empty required fields")
+	// Validate централизует все доменные проверки модели.
+	if err := message.Validate(); err != nil {
+		return fmt.Errorf("validate message: %w", err)
 	}
 
+	// После всех проверок сохраняем сообщение в постоянное хранилище.
 	if err := s.repo.Save(ctx, message); err != nil {
 		return fmt.Errorf("save message: %w", err)
 	}

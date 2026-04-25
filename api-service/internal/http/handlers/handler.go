@@ -11,6 +11,7 @@ import (
 	"api-service/internal/service"
 )
 
+// Handler объединяет HTTP-обработчики и доступ к бизнес-сервисам.
 type Handler struct {
 	authSvc    *service.AuthService
 	userSvc    *service.UserService
@@ -19,6 +20,7 @@ type Handler struct {
 	logger     *slog.Logger
 }
 
+// New создает HTTP-слой и внедряет зависимости сервисного уровня.
 func New(authSvc *service.AuthService, userSvc *service.UserService, chatSvc *service.ChatService, messageSvc *service.MessageService, logger *slog.Logger) *Handler {
 	return &Handler{
 		authSvc:    authSvc,
@@ -29,6 +31,7 @@ func New(authSvc *service.AuthService, userSvc *service.UserService, chatSvc *se
 	}
 }
 
+// Register регистрирует публичные API-маршруты приложения.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/register", h.register)
 	mux.HandleFunc("/login", h.login)
@@ -38,6 +41,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/chats", h.listChats)
 }
 
+// register создает нового пользователя по username.
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -58,6 +62,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user, h.logger)
 }
 
+// login выполняет вход существующего пользователя по username.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -82,6 +87,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user, h.logger)
 }
 
+// listUsers возвращает список зарегистрированных пользователей.
 func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -96,6 +102,7 @@ func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, users, h.logger)
 }
 
+// createDirectChat создает личный чат между двумя пользователями или возвращает существующий.
 func (h *Handler) createDirectChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -116,6 +123,7 @@ func (h *Handler) createDirectChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, model.ChatResponse{ChatID: chatID}, h.logger)
 }
 
+// listMessages возвращает историю сообщений чата с пагинацией по времени.
 func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -137,6 +145,7 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, messages, h.logger)
 }
 
+// listChats возвращает список чатов пользователя с последними сообщениями.
 func (h *Handler) listChats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -157,6 +166,7 @@ func (h *Handler) listChats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chats, h.logger)
 }
 
+// writeJSON сериализует значение и записывает JSON-ответ.
 func writeJSON(w http.ResponseWriter, status int, value any, logger *slog.Logger) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -165,6 +175,7 @@ func writeJSON(w http.ResponseWriter, status int, value any, logger *slog.Logger
 	}
 }
 
+// CORS добавляет базовые CORS-заголовки и обрабатывает preflight-запросы.
 func CORS(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -184,11 +195,13 @@ type statusWriter struct {
 	status int
 }
 
+// WriteHeader перехватывает код ответа для логирования.
 func (sw *statusWriter) WriteHeader(statusCode int) {
 	sw.status = statusCode
 	sw.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Logging логирует метод, путь, статус и длительность каждого HTTP-запроса.
 func Logging(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

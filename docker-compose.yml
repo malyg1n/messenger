@@ -78,6 +78,8 @@ services:
     volumes:
       - ./message-service:/app
       - go_mod_cache:/go/pkg/mod
+    ports:
+      - "8082:8082"
     depends_on:
       kafka:
         condition: service_healthy

@@ -10,6 +10,7 @@ import (
 	"message-service/internal/bootstrap"
 )
 
+// main — точка входа message-service: поднимает app и запускает Kafka consumer.
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

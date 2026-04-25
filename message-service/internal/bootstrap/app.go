@@ -3,8 +3,11 @@ package bootstrap
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -18,14 +21,22 @@ import (
 	"message-service/internal/service"
 )
 
+var (
+	ErrNoKafkaBrokers   = errors.New("no kafka brokers configured")
+	ErrKafkaUnavailable = errors.New("kafka brokers are unavailable")
+)
+
+// App хранит инфраструктурные зависимости message-service.
 type App struct {
 	Config       config.Config
 	Logger       *slog.Logger
 	DB           *sql.DB
 	KafkaReader  *kafka.Reader
 	KafkaConsume *consumer.KafkaConsumer
+	HTTPServer   *http.Server
 }
 
+// Build собирает конфиг, инфраструктуру Kafka/Postgres и runtime-объекты сервиса.
 func Build() (*App, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -54,24 +65,70 @@ func Build() (*App, error) {
 	messageSvc := service.NewMessageService(messageRepo)
 	messageConsumer := consumer.NewKafkaConsumer(reader, messageSvc, logger, cfg.KafkaTopic)
 
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/ready", readyHandler(db, cfg.KafkaBrokers))
+
+	httpServer := &http.Server{
+		Addr:    ":" + cfg.ProbePort,
+		Handler: mux,
+	}
+
 	return &App{
 		Config:       cfg,
 		Logger:       logger,
 		DB:           db,
 		KafkaReader:  reader,
 		KafkaConsume: messageConsumer,
+		HTTPServer:   httpServer,
 	}, nil
 }
 
+// Run параллельно запускает probe-сервер и Kafka-consumer, завершаясь по контексту.
 func (a *App) Run(ctx context.Context) error {
-	if err := a.KafkaConsume.Run(ctx); err != nil {
-		return fmt.Errorf("run kafka consumer: %w", err)
-	}
+	serverErrCh := make(chan error, 1)
+	go func() {
+		if err := a.HTTPServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrCh <- fmt.Errorf("run http probe server: %w", err)
+			return
+		}
+		serverErrCh <- nil
+	}()
 
-	return nil
+	consumerErrCh := make(chan error, 1)
+	go func() {
+		if err := a.KafkaConsume.Run(ctx); err != nil {
+			consumerErrCh <- fmt.Errorf("run kafka consumer: %w", err)
+			return
+		}
+		consumerErrCh <- nil
+	}()
+
+	select {
+	case err := <-serverErrCh:
+		return err
+	case err := <-consumerErrCh:
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := a.HTTPServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("shutdown http probe server: %w", err)
+		}
+		return nil
+	}
 }
 
+// Close корректно закрывает HTTP-сервер, Kafka reader и соединение с БД.
 func (a *App) Close() {
+	if a.HTTPServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.HTTPServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			a.Logger.Error("failed to close http server", "component", "bootstrap", "operation", "close.http_server", "error", err)
+		}
+	}
 	if a.KafkaReader != nil {
 		if err := a.KafkaReader.Close(); err != nil {
 			a.Logger.Error("failed to close kafka reader", "component", "bootstrap", "operation", "close.kafka_reader", "error", err)
@@ -84,6 +141,7 @@ func (a *App) Close() {
 	}
 }
 
+// initDB открывает подключение к Postgres и проверяет доступность БД.
 func initDB(cfg config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.PostgresDSN)
 	if err != nil {
@@ -100,7 +158,83 @@ func initDB(cfg config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
+// newLogger создает JSON-логгер.
 func newLogger(level slog.Level) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
 	return slog.New(handler)
+}
+
+type probeResponse struct {
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// healthHandler сообщает, что процесс жив.
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	writeProbeResponse(w, http.StatusOK, probeResponse{Status: "ok"})
+}
+
+// readyHandler проверяет доступность БД и Kafka-брокеров.
+func readyHandler(db *sql.DB, brokers []string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if err := db.PingContext(ctx); err != nil {
+			writeProbeResponse(w, http.StatusServiceUnavailable, probeResponse{
+				Status: "not_ready",
+				Error:  fmt.Sprintf("db ping failed: %v", err),
+			})
+			return
+		}
+
+		if err := checkKafkaBrokers(ctx, brokers); err != nil {
+			probeErr := fmt.Sprintf("kafka unavailable: %v", err)
+			switch {
+			case errors.Is(err, ErrNoKafkaBrokers):
+				probeErr = "kafka unavailable: no brokers configured"
+			case errors.Is(err, ErrKafkaUnavailable):
+				probeErr = "kafka unavailable: brokers are unreachable"
+			}
+			writeProbeResponse(w, http.StatusServiceUnavailable, probeResponse{
+				Status: "not_ready",
+				Error:  probeErr,
+			})
+			return
+		}
+
+		writeProbeResponse(w, http.StatusOK, probeResponse{Status: "ready"})
+	}
+}
+
+// checkKafkaBrokers пытается подключиться хотя бы к одному брокеру Kafka.
+func checkKafkaBrokers(ctx context.Context, brokers []string) error {
+	if len(brokers) == 0 {
+		return ErrNoKafkaBrokers
+	}
+
+	var lastErr error
+	for _, brokerAddr := range brokers {
+		conn, err := kafka.DialContext(ctx, "tcp", brokerAddr)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = conn.Close()
+		return nil
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("%w: %w", ErrKafkaUnavailable, lastErr)
+	}
+	return ErrKafkaUnavailable
+}
+
+// writeProbeResponse формирует JSON-ответ probe-эндпоинтов.
+func writeProbeResponse(w http.ResponseWriter, statusCode int, payload probeResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		http.Error(w, `{"status":"error","error":"encode response failed"}`, http.StatusInternalServerError)
+	}
 }

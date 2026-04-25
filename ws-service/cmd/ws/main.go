@@ -10,6 +10,7 @@ import (
 	"ws-service/internal/bootstrap"
 )
 
+// main — точка входа ws-service: запускает websocket-сервер и Kafka-consumer.
 func main() {
 	app, err := bootstrap.Build()
 	if err != nil {

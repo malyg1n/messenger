@@ -10,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Config описывает настройки ws-service из переменных окружения.
 type Config struct {
 	WSPort            string
 	PostgresDSN       string
@@ -20,6 +21,7 @@ type Config struct {
 	LoadedEnvFile     string
 }
 
+// Load загружает env, парсит LOG_LEVEL и валидирует обязательные значения.
 func Load() (Config, error) {
 	loadedEnvFile := loadDotEnv()
 
@@ -56,6 +58,7 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// loadDotEnv пытается загрузить .env из стандартных путей разработки.
 func loadDotEnv() string {
 	candidates := []string{
 		".env",
@@ -69,6 +72,7 @@ func loadDotEnv() string {
 	return ""
 }
 
+// parseLogLevel преобразует строковое значение уровня в slog.Level.
 func parseLogLevel(value string) (slog.Level, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	switch normalized {
@@ -85,6 +89,7 @@ func parseLogLevel(value string) (slog.Level, error) {
 	}
 }
 
+// validate проверяет наличие обязательных env-переменных.
 func validate(cfg Config) error {
 	missing := make([]string, 0)
 	if cfg.WSPort == "" {

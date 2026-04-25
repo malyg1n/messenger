@@ -1,28 +1,32 @@
 package bootstrap
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"api-service/internal/config"
 	httpHandlers "api-service/internal/http/handlers"
-	"api-service/internal/kafka"
 	"api-service/internal/repository"
 	"api-service/internal/service"
+
 	_ "github.com/lib/pq"
 )
 
+// App хранит инфраструктурные зависимости запущенного api-service.
 type App struct {
-	Config         config.Config
-	Logger         *slog.Logger
-	DB             *sql.DB
-	KafkaProducer  kafka.Producer
-	HTTPServer     *http.Server
+	Config     config.Config
+	Logger     *slog.Logger
+	DB         *sql.DB
+	HTTPServer *http.Server
 }
 
+// Build собирает объект приложения и связывает конфиг, БД, сервисы и HTTP-роуты.
 func Build() (*App, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -40,19 +44,19 @@ func Build() (*App, error) {
 		return nil, err
 	}
 
-	producer := kafka.NewWriterProducer(cfg.KafkaBrokers, cfg.KafkaClientID)
-
 	userRepo := repository.NewUserRepository(db)
 	chatRepo := repository.NewChatRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
 
-	authSvc := service.NewAuthService(userRepo, producer, cfg.KafkaTopicUserRegistered, logger)
+	authSvc := service.NewAuthService(userRepo, logger)
 	userSvc := service.NewUserService(userRepo)
-	chatSvc := service.NewChatService(chatRepo, producer, cfg.KafkaTopicChatCreated, logger)
+	chatSvc := service.NewChatService(chatRepo, logger)
 	messageSvc := service.NewMessageService(messageRepo)
 
 	handler := httpHandlers.New(authSvc, userSvc, chatSvc, messageSvc, logger)
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/ready", readyHandler(db))
 	handler.Register(mux)
 
 	finalHandler := httpHandlers.CORS(cfg.CORSAllowedOrigin, httpHandlers.Logging(logger, mux))
@@ -62,20 +66,15 @@ func Build() (*App, error) {
 	}
 
 	return &App{
-		Config:        cfg,
-		Logger:        logger,
-		DB:            db,
-		KafkaProducer: producer,
-		HTTPServer:    srv,
+		Config:     cfg,
+		Logger:     logger,
+		DB:         db,
+		HTTPServer: srv,
 	}, nil
 }
 
+// Close освобождает внешние ресурсы приложения.
 func (a *App) Close() {
-	if a.KafkaProducer != nil {
-		if err := a.KafkaProducer.Close(); err != nil {
-			a.Logger.Error("failed to close kafka producer", "component", "bootstrap", "operation", "close.kafka", "error", err)
-		}
-	}
 	if a.DB != nil {
 		if err := a.DB.Close(); err != nil {
 			a.Logger.Error("failed to close db", "component", "bootstrap", "operation", "close.db", "error", err)
@@ -83,6 +82,7 @@ func (a *App) Close() {
 	}
 }
 
+// initDB открывает подключение к Postgres и проверяет его доступность.
 func initDB(cfg config.Config) (*sql.DB, error) {
 	db, err := sql.Open("postgres", cfg.PostgresDSN)
 	if err != nil {
@@ -95,9 +95,47 @@ func initDB(cfg config.Config) (*sql.DB, error) {
 	return db, nil
 }
 
+// newLogger создает JSON-логгер с уровнем из конфигурации.
 func newLogger(level slog.Level) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,
 	})
 	return slog.New(handler)
+}
+
+type probeResponse struct {
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// healthHandler сообщает, что процесс жив и принимает запросы.
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	writeProbeResponse(w, http.StatusOK, probeResponse{Status: "ok"})
+}
+
+// readyHandler проверяет готовность приложения обслуживать трафик.
+func readyHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		if err := db.PingContext(ctx); err != nil {
+			writeProbeResponse(w, http.StatusServiceUnavailable, probeResponse{
+				Status: "not_ready",
+				Error:  fmt.Sprintf("db ping failed: %v", err),
+			})
+			return
+		}
+
+		writeProbeResponse(w, http.StatusOK, probeResponse{Status: "ready"})
+	}
+}
+
+// writeProbeResponse унифицирует JSON-ответы health/readiness эндпоинтов.
+func writeProbeResponse(w http.ResponseWriter, statusCode int, payload probeResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		http.Error(w, `{"status":"error","error":"encode response failed"}`, http.StatusInternalServerError)
+	}
 }

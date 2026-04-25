@@ -9,12 +9,14 @@ import (
 	"ws-service/internal/model"
 )
 
+// Hub хранит активные websocket-подключения пользователей и выполняет рассылку.
 type Hub struct {
 	mu          sync.RWMutex
 	connections map[string]*websocket.Conn
 	logger      *slog.Logger
 }
 
+// NewHub создает пустой Hub подключений.
 func NewHub(logger *slog.Logger) *Hub {
 	return &Hub{
 		connections: make(map[string]*websocket.Conn),
@@ -22,6 +24,7 @@ func NewHub(logger *slog.Logger) *Hub {
 	}
 }
 
+// Register регистрирует активное подключение пользователя, закрывая предыдущее при наличии.
 func (h *Hub) Register(userID string, conn *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -31,12 +34,14 @@ func (h *Hub) Register(userID string, conn *websocket.Conn) {
 	h.connections[userID] = conn
 }
 
+// Unregister удаляет подключение пользователя из реестра.
 func (h *Hub) Unregister(userID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.connections, userID)
 }
 
+// Broadcast отправляет сообщение всем переданным пользователям, если они онлайн.
 func (h *Hub) Broadcast(userIDs []string, msg model.ChatMessage) {
 	conns := make(map[string]*websocket.Conn)
 

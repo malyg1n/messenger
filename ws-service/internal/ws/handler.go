@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -12,6 +13,7 @@ import (
 	"ws-service/internal/model"
 )
 
+// Handler обслуживает websocket-подключения и отправляет сообщения в Kafka.
 type Handler struct {
 	producer broker.Producer
 	hub      *Hub
@@ -19,6 +21,7 @@ type Handler struct {
 	upgrader websocket.Upgrader
 }
 
+// NewHandler создает websocket-handler с доступом к Kafka producer и Hub.
 func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger) *Handler {
 	return &Handler{
 		producer: producer,
@@ -30,7 +33,9 @@ func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger) *Handle
 	}
 }
 
+// HandleWS обрабатывает lifecycle websocket-сессии конкретного пользователя.
 func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
+	// user_id — ключ маршрутизации в Hub: для пользователя держим одно активное подключение.
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
 		http.Error(w, "missing user_id", http.StatusBadRequest)
@@ -51,12 +56,15 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	conn.SetReadLimit(16 * 1024) // 16KB
 	defer conn.Close()
 
 	h.hub.Register(userID, conn)
 	defer h.hub.Unregister(userID)
 
 	for {
+		// Читаем сообщение клиента, валидируем и публикуем в Kafka.
+		// Рассылка получателям происходит асинхронно через consumer + hub.
 		_, payload, err := conn.ReadMessage()
 		if err != nil {
 			h.logger.Info("websocket connection closed",
@@ -73,6 +81,28 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("invalid websocket message payload",
 				"component", "ws.handler",
 				"operation", "handle_ws.unmarshal",
+				"user_id", userID,
+				"error", err,
+			)
+			continue
+		}
+
+		if err := msg.Validate(); err != nil {
+			if errors.Is(err, model.ErrChatIDRequired) ||
+				errors.Is(err, model.ErrSenderIDRequired) ||
+				errors.Is(err, model.ErrBodyRequired) ||
+				errors.Is(err, model.ErrBodyTooLong) {
+				h.logger.Warn("invalid websocket message payload",
+					"component", "ws.handler",
+					"operation", "handle_ws.validate",
+					"user_id", userID,
+					"error", err,
+				)
+				continue
+			}
+			h.logger.Error("failed to validate websocket message",
+				"component", "ws.handler",
+				"operation", "handle_ws.validate",
 				"user_id", userID,
 				"error", err,
 			)

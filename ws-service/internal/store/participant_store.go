@@ -6,14 +6,17 @@ import (
 	"fmt"
 )
 
+// ParticipantStore читает участников чатов из Postgres.
 type ParticipantStore struct {
 	db *sql.DB
 }
 
+// NewParticipantStore создает store для работы с участниками чатов.
 func NewParticipantStore(db *sql.DB) *ParticipantStore {
 	return &ParticipantStore{db: db}
 }
 
+// GetByChatID возвращает список user_id, участвующих в чате.
 func (s *ParticipantStore) GetByChatID(ctx context.Context, chatID string) ([]string, error) {
 	rows, err := s.db.QueryContext(
 		ctx,

@@ -10,41 +10,24 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Config описывает обязательные настройки api-service из окружения.
 type Config struct {
-	APIPort                 string
-	PostgresDSN             string
-	CORSAllowedOrigin       string
-	KafkaBrokers            []string
-	KafkaClientID           string
-	KafkaTopicUserRegistered string
-	KafkaTopicChatCreated   string
-	LogLevel                slog.Level
-	LoadedEnvFile           string
+	APIPort           string
+	PostgresDSN       string
+	CORSAllowedOrigin string
+	LogLevel          slog.Level
+	LoadedEnvFile     string
 }
 
+// Load загружает переменные окружения, парсит лог-уровень и валидирует конфиг.
 func Load() (Config, error) {
 	loadedEnvFile := loadDotEnv()
 
 	cfg := Config{
-		APIPort:                 os.Getenv("API_PORT"),
-		PostgresDSN:             os.Getenv("POSTGRES_DSN"),
-		CORSAllowedOrigin:       os.Getenv("CORS_ALLOWED_ORIGIN"),
-		KafkaClientID:           os.Getenv("KAFKA_CLIENT_ID"),
-		KafkaTopicUserRegistered: os.Getenv("KAFKA_TOPIC_USER_REGISTERED"),
-		KafkaTopicChatCreated:   os.Getenv("KAFKA_TOPIC_CHAT_CREATED"),
-		LoadedEnvFile:           loadedEnvFile,
-	}
-
-	brokersRaw := os.Getenv("KAFKA_BROKERS")
-	if brokersRaw != "" {
-		parts := strings.Split(brokersRaw, ",")
-		cfg.KafkaBrokers = make([]string, 0, len(parts))
-		for _, part := range parts {
-			broker := strings.TrimSpace(part)
-			if broker != "" {
-				cfg.KafkaBrokers = append(cfg.KafkaBrokers, broker)
-			}
-		}
+		APIPort:           os.Getenv("API_PORT"),
+		PostgresDSN:       os.Getenv("POSTGRES_DSN"),
+		CORSAllowedOrigin: os.Getenv("CORS_ALLOWED_ORIGIN"),
+		LoadedEnvFile:     loadedEnvFile,
 	}
 
 	level, err := parseLogLevel(os.Getenv("LOG_LEVEL"))
@@ -60,6 +43,7 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// loadDotEnv пытается подгрузить .env из стандартных путей разработки.
 func loadDotEnv() string {
 	candidates := []string{
 		".env",
@@ -73,6 +57,7 @@ func loadDotEnv() string {
 	return ""
 }
 
+// parseLogLevel преобразует строку уровня логирования в slog.Level.
 func parseLogLevel(value string) (slog.Level, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	switch normalized {
@@ -89,6 +74,7 @@ func parseLogLevel(value string) (slog.Level, error) {
 	}
 }
 
+// validate проверяет наличие обязательных переменных окружения.
 func validate(cfg Config) error {
 	missing := make([]string, 0)
 	if cfg.APIPort == "" {
@@ -99,18 +85,6 @@ func validate(cfg Config) error {
 	}
 	if cfg.CORSAllowedOrigin == "" {
 		missing = append(missing, "CORS_ALLOWED_ORIGIN")
-	}
-	if len(cfg.KafkaBrokers) == 0 {
-		missing = append(missing, "KAFKA_BROKERS")
-	}
-	if cfg.KafkaClientID == "" {
-		missing = append(missing, "KAFKA_CLIENT_ID")
-	}
-	if cfg.KafkaTopicUserRegistered == "" {
-		missing = append(missing, "KAFKA_TOPIC_USER_REGISTERED")
-	}
-	if cfg.KafkaTopicChatCreated == "" {
-		missing = append(missing, "KAFKA_TOPIC_CHAT_CREATED")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))

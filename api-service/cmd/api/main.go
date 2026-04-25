@@ -9,6 +9,7 @@ import (
 	"api-service/internal/bootstrap"
 )
 
+// main — точка входа api-service: собирает зависимости и запускает HTTP-сервер.
 func main() {
 	app, err := bootstrap.Build()
 	if err != nil {

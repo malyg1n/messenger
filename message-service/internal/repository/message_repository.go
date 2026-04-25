@@ -10,14 +10,17 @@ import (
 	"message-service/internal/model"
 )
 
+// MessageRepository сохраняет сообщения в хранилище Postgres.
 type MessageRepository struct {
 	db *sql.DB
 }
 
+// NewMessageRepository создает репозиторий сообщений.
 func NewMessageRepository(db *sql.DB) *MessageRepository {
 	return &MessageRepository{db: db}
 }
 
+// Save сохраняет одно сообщение чата в таблицу messages.
 func (r *MessageRepository) Save(ctx context.Context, message model.ChatMessage) error {
 	_, err := r.db.ExecContext(
 		ctx,

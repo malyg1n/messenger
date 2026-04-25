@@ -224,6 +224,32 @@ body {
   color: #64748b;
 }
 
+.chat-connection-status {
+  margin-left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chat-connection-dot-connecting {
+  background: #f59e0b;
+}
+
+.chat-connection-dot-connected {
+  background: #16a34a;
+}
+
+.chat-connection-dot-disconnected {
+  background: #dc2626;
+}
+
 .chat-logout-btn {
   padding: 8px 12px;
   font-size: 13px;

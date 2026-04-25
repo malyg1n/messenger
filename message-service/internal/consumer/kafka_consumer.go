@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -15,6 +16,7 @@ type messageProcessor interface {
 	Process(ctx context.Context, message model.ChatMessage) error
 }
 
+// KafkaConsumer читает сообщения из Kafka и передает их в доменный сервис.
 type KafkaConsumer struct {
 	reader    *kafka.Reader
 	service   messageProcessor
@@ -22,6 +24,7 @@ type KafkaConsumer struct {
 	topicName string
 }
 
+// NewKafkaConsumer создает Kafka-consumer с зависимостями обработки.
 func NewKafkaConsumer(reader *kafka.Reader, service messageProcessor, logger *slog.Logger, topicName string) *KafkaConsumer {
 	return &KafkaConsumer{
 		reader:    reader,
@@ -31,6 +34,7 @@ func NewKafkaConsumer(reader *kafka.Reader, service messageProcessor, logger *sl
 	}
 }
 
+// Run запускает бесконечный цикл чтения, обработки и commit офсетов.
 func (c *KafkaConsumer) Run(ctx context.Context) error {
 	for {
 		msg, err := c.reader.FetchMessage(ctx)
@@ -49,6 +53,18 @@ func (c *KafkaConsumer) Run(ctx context.Context) error {
 		}
 
 		if err := c.processMessage(ctx, msg); err != nil {
+			if isValidationError(err) {
+				c.logger.Warn(
+					"skip invalid kafka message",
+					"component", "consumer",
+					"operation", "kafka.process_message",
+					"topic", msg.Topic,
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+					"error", err,
+				)
+				continue
+			}
 			c.logger.Error(
 				"failed to process kafka message",
 				"component", "consumer",
@@ -75,6 +91,14 @@ func (c *KafkaConsumer) Run(ctx context.Context) error {
 	}
 }
 
+func isValidationError(err error) bool {
+	return errors.Is(err, model.ErrChatIDRequired) ||
+		errors.Is(err, model.ErrSenderIDRequired) ||
+		errors.Is(err, model.ErrBodyRequired) ||
+		errors.Is(err, model.ErrBodyTooLong)
+}
+
+// processMessage декодирует Kafka payload и передает сообщение в бизнес-логику.
 func (c *KafkaConsumer) processMessage(ctx context.Context, rawMessage kafka.Message) error {
 	var message model.ChatMessage
 	if err := json.Unmarshal(rawMessage.Value, &message); err != nil {

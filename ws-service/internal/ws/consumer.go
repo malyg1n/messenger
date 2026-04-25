@@ -7,19 +7,21 @@ import (
 
 	"ws-service/internal/broker"
 	"ws-service/internal/model"
-	"ws-service/internal/store"
+	"ws-service/internal/service"
 )
 
+// Consumer читает сообщения из Kafka и отправляет их онлайн-участникам чата.
 type Consumer struct {
 	brokerConsumer broker.Consumer
-	participants   *store.ParticipantStore
+	participants   *service.ParticipantsService
 	hub            *Hub
 	logger         *slog.Logger
 }
 
+// NewConsumer создает обработчик входящего Kafka-потока для websocket-рассылки.
 func NewConsumer(
 	brokerConsumer broker.Consumer,
-	participants *store.ParticipantStore,
+	participants *service.ParticipantsService,
 	hub *Hub,
 	logger *slog.Logger,
 ) *Consumer {
@@ -31,8 +33,10 @@ func NewConsumer(
 	}
 }
 
+// Run запускает непрерывный цикл: decode -> resolve participants -> broadcast.
 func (c *Consumer) Run(ctx context.Context) {
 	for {
+		// Читаем события из Kafka: это уже «принятые» сообщения от websocket-handler.
 		msg, err := c.brokerConsumer.ReadMessage(ctx)
 		if err != nil {
 			c.logger.Error("failed to read kafka message",
@@ -53,6 +57,7 @@ func (c *Consumer) Run(ctx context.Context) {
 			continue
 		}
 
+		// Получаем состав чата и рассылаем сообщение только его участникам.
 		userIDs, err := c.participants.GetByChatID(ctx, chatMessage.ChatID)
 		if err != nil {
 			c.logger.Error("failed to load chat participants",
