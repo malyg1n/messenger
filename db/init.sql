@@ -28,3 +28,12 @@ create table if not exists chat_participants (
     user_id uuid references users(id),
     primary key (chat_id, user_id)
 );
+
+create index if not exists messages_chat_created_idx
+on messages(chat_id, created_at desc);
+
+create index if not exists chat_participants_user_idx
+on chat_participants(user_id);
+
+create index if not exists chat_participants_chat_idx
+on chat_participants(chat_id);
