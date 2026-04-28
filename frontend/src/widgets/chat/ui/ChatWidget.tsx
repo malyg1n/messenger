@@ -4,6 +4,8 @@ import type { ChatMessage } from "@/entities/message"
 import { UsersList } from "@/entities/user"
 import type { User } from "@/entities/user"
 import api from "@/shared/api/client"
+import { getAuthToken } from "@/shared/config/storage"
+import { playNewMessageSound, warmupMessageSound } from "@/shared/lib/audio/newMessageSound"
 
 type Props = {
   user: User
@@ -128,7 +130,14 @@ export default function ChatWidget({ user, onLogout }: Props) {
   // createSocket создает websocket-подключение для текущего пользователя.
   function createSocket() {
     const wsUrl = import.meta.env.VITE_WS_URL ?? "ws://localhost:8080/ws"
-    return new WebSocket(`${wsUrl}?user_id=${user.id}`)
+    const token = getAuthToken()
+    const params = new URLSearchParams({
+      user_id: user.id
+    })
+    if (token) {
+      params.set("token", token)
+    }
+    return new WebSocket(`${wsUrl}?${params.toString()}`)
   }
 
   useEffect(() => {
@@ -152,6 +161,8 @@ export default function ChatWidget({ user, onLogout }: Props) {
       ws.onmessage = e => {
         const m = JSON.parse(e.data) as { sender_id: string; chat_id: string; body: string; created_at?: string }
         const createdAt = m.created_at ?? new Date().toISOString()
+        const isIncoming = m.sender_id !== user.id
+        const isActiveChatMessage = m.chat_id === selectedChatIdRef.current
         if (m.chat_id) {
           setLastMessageOverrides(prev => ({
             ...prev,
@@ -161,7 +172,10 @@ export default function ChatWidget({ user, onLogout }: Props) {
             }
           }))
         }
-        if (m.sender_id !== user.id && m.chat_id === selectedChatIdRef.current) {
+        if (isIncoming) {
+          playNewMessageSound()
+        }
+        if (isIncoming && isActiveChatMessage) {
           // Если сообщение относится к открытому чату — сразу показываем его в ленте.
           setMessages(prev => [
             ...prev,
@@ -175,7 +189,7 @@ export default function ChatWidget({ user, onLogout }: Props) {
           ])
           scrollToBottom()
         }
-        if (m.sender_id !== user.id) {
+        if (isIncoming) {
           setChatsRefreshToken(prev => prev + 1)
         }
       }
@@ -213,6 +227,21 @@ export default function ChatWidget({ user, onLogout }: Props) {
       setSocket(null)
     }
   }, [user.id])
+
+  useEffect(() => {
+    // Браузеры требуют user gesture для старта звука.
+    const enableAudio = () => {
+      void warmupMessageSound()
+    }
+
+    window.addEventListener("pointerdown", enableAudio, { once: true })
+    window.addEventListener("keydown", enableAudio, { once: true })
+
+    return () => {
+      window.removeEventListener("pointerdown", enableAudio)
+      window.removeEventListener("keydown", enableAudio)
+    }
+  }, [])
 
   // send отправляет сообщение в websocket и сразу отражает его в интерфейсе.
   function send() {

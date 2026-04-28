@@ -1,6 +1,7 @@
 import { useState } from "react"
 import api from "@/shared/api/client"
 import type { User } from "@/entities/user"
+import { STORAGE_USER_KEY } from "@/shared/config/storage"
 
 type Props = {
   onAuth: (user: User) => void
@@ -14,8 +15,13 @@ export default function AuthForm({ onAuth }: Props) {
   // handleLogin выполняет вход и сохраняет пользователя в localStorage.
   async function handleLogin() {
     try {
-      const user = await api.login(username)
-      localStorage.setItem("user", JSON.stringify(user))
+      const userData = await api.login(username)
+      const user = {
+        id: userData.user.id,
+        username: userData.user.username,
+        token: userData.token
+      }
+      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user))
       onAuth(user)
     } catch {
       setError("user not found")
@@ -25,8 +31,13 @@ export default function AuthForm({ onAuth }: Props) {
   // handleRegister создает пользователя и сразу авторизует его в UI.
   async function handleRegister() {
     try {
-      const user = await api.register(username)
-      localStorage.setItem("user", JSON.stringify(user))
+      const userData = await api.register(username)
+      const user = {
+        id: userData.user.id,
+        username: userData.user.username,
+        token: userData.token
+      }
+      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user))
       onAuth(user)
     } catch {
       setError("username taken")

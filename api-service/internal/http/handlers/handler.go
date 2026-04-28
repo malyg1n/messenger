@@ -5,10 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"api-service/internal/http/dto"
 	"api-service/internal/model"
 	"api-service/internal/service"
+	"api-service/pkg/auth"
 )
 
 // Handler объединяет HTTP-обработчики и доступ к бизнес-сервисам.
@@ -18,16 +21,18 @@ type Handler struct {
 	chatSvc    *service.ChatService
 	messageSvc *service.MessageService
 	logger     *slog.Logger
+	jwtSvc     *auth.JWTService
 }
 
 // New создает HTTP-слой и внедряет зависимости сервисного уровня.
-func New(authSvc *service.AuthService, userSvc *service.UserService, chatSvc *service.ChatService, messageSvc *service.MessageService, logger *slog.Logger) *Handler {
+func New(authSvc *service.AuthService, userSvc *service.UserService, chatSvc *service.ChatService, messageSvc *service.MessageService, logger *slog.Logger, jwtSvc *auth.JWTService) *Handler {
 	return &Handler{
 		authSvc:    authSvc,
 		userSvc:    userSvc,
 		chatSvc:    chatSvc,
 		messageSvc: messageSvc,
 		logger:     logger,
+		jwtSvc:     jwtSvc,
 	}
 }
 
@@ -59,7 +64,19 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username taken", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, user, h.logger)
+
+	token, err := h.jwtSvc.Generate(user.ID, user.Username)
+	if err != nil {
+		h.logger.Error("generate token failed", "component", "http.register", "operation", "generate_token", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := dto.AuthResponse{
+		User:  user,
+		Token: token,
+	}
+	writeJSON(w, http.StatusOK, resp, h.logger)
 }
 
 // login выполняет вход существующего пользователя по username.
@@ -84,7 +101,17 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, user, h.logger)
+	token, err := h.jwtSvc.Generate(user.ID, user.Username)
+	if err != nil {
+		h.logger.Error("generate token failed", "component", "http.login", "operation", "generate_token", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	resp := dto.AuthResponse{
+		User:  user,
+		Token: token,
+	}
+	writeJSON(w, http.StatusOK, resp, h.logger)
 }
 
 // listUsers возвращает список зарегистрированных пользователей.
@@ -108,15 +135,20 @@ func (h *Handler) createDirectChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	userID, err := h.currentUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req model.CreateChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 
-	chatID, err := h.chatSvc.GetOrCreateDirect(r.Context(), req.UserID, req.TargetUserID)
+	chatID, err := h.chatSvc.GetOrCreateDirect(r.Context(), userID, req.TargetUserID)
 	if err != nil {
-		h.logger.Error("direct chat failed", "component", "http.chats.direct", "operation", "create_or_get", "user_id", req.UserID, "target_user_id", req.TargetUserID, "error", err)
+		h.logger.Error("direct chat failed", "component", "http.chats.direct", "operation", "create_or_get", "user_id", userID, "target_user_id", req.TargetUserID, "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -151,9 +183,9 @@ func (h *Handler) listChats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		http.Error(w, "user_id is required", http.StatusBadRequest)
+	userID, err := h.currentUserIDFromToken(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -164,6 +196,33 @@ func (h *Handler) listChats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, chats, h.logger)
+}
+
+func (h *Handler) currentUserIDFromToken(r *http.Request) (string, error) {
+	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authHeader == "" {
+		return "", errors.New("missing authorization header")
+	}
+
+	const bearerPrefix = "Bearer "
+	if !strings.HasPrefix(authHeader, bearerPrefix) {
+		return "", errors.New("invalid authorization scheme")
+	}
+
+	tokenString := strings.TrimSpace(strings.TrimPrefix(authHeader, bearerPrefix))
+	if tokenString == "" {
+		return "", errors.New("empty token")
+	}
+
+	claims, err := h.jwtSvc.Parse(tokenString)
+	if err != nil {
+		return "", err
+	}
+	if claims.Subject == "" {
+		return "", errors.New("token subject is empty")
+	}
+
+	return claims.Subject, nil
 }
 
 // writeJSON сериализует значение и записывает JSON-ответ.
@@ -179,7 +238,7 @@ func writeJSON(w http.ResponseWriter, status int, value any, logger *slog.Logger
 func CORS(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
 		if r.Method == http.MethodOptions {

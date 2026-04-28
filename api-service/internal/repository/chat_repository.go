@@ -36,8 +36,8 @@ func (r *ChatRepository) FindDirectChatID(ctx context.Context, userID string, ta
 }
 
 // CreateDirectChat создает новый чат и добавляет обоих участников.
-func (r *ChatRepository) CreateDirectChat(ctx context.Context, chatID string, userID string, targetUserID string) error {
-	_, err := r.db.ExecContext(ctx, "insert into chats(id) values ($1)", chatID)
+func (r *ChatRepository) CreateDirectChat(ctx context.Context, chatID string, userID string, targetUserID string, chatKey string) error {
+	_, err := r.db.ExecContext(ctx, "insert into chats(id, chat_key) values ($1, $2) on conflict do nothing", chatID, chatKey)
 	if err != nil {
 		return fmt.Errorf("create chat: %w", err)
 	}

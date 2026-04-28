@@ -37,7 +37,8 @@ func (s *ChatService) GetOrCreateDirect(ctx context.Context, userID string, targ
 	}
 
 	chatID = uuid.New().String()
-	if err := s.chats.CreateDirectChat(ctx, chatID, userID, targetUserID); err != nil {
+	chatKey := s.makeChatKey(userID, targetUserID)
+	if err := s.chats.CreateDirectChat(ctx, chatID, userID, targetUserID, chatKey); err != nil {
 		return "", err
 	}
 
@@ -47,4 +48,11 @@ func (s *ChatService) GetOrCreateDirect(ctx context.Context, userID string, targ
 // ListForUser возвращает список чатов, в которых участвует пользователь.
 func (s *ChatService) ListForUser(ctx context.Context, userID string) ([]model.ChatListItem, error) {
 	return s.chats.ListForUser(ctx, userID)
+}
+
+func( s *ChatService) makeChatKey(a, b string) string {
+	if a < b {
+		return a + "_" + b
+	}
+	return b + "_" + a
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"ws-service/auth"
 	"ws-service/internal/broker"
 	"ws-service/internal/model"
 )
@@ -22,10 +23,11 @@ type Handler struct {
 	hub      *Hub
 	logger   *slog.Logger
 	upgrader websocket.Upgrader
+	jwtSvc   *auth.JWTService
 }
 
 // NewHandler создает websocket-handler с доступом к Kafka producer и Hub.
-func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger) *Handler {
+func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger, jwtSvc *auth.JWTService) *Handler {
 	return &Handler{
 		producer: producer,
 		hub:      hub,
@@ -33,13 +35,27 @@ func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger) *Handle
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool { return true },
 		},
+		jwtSvc: jwtSvc,
 	}
 }
 
 // HandleWS обрабатывает lifecycle websocket-сессии конкретного пользователя.
 func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 	// user_id — ключ маршрутизации в Hub: для пользователя держим одно активное подключение.
-	userID := r.URL.Query().Get("user_id")
+	// userID := r.URL.Query().Get("user_id")
+	token := r.URL.Query().Get("token")
+	parsedToken, err := h.jwtSvc.Parse(token)
+	if err != nil {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		h.logger.Warn("invalid token",
+			"component", "ws.handler",
+			"operation", "handle_ws.validate_token",
+			"error", err,
+		)
+		return
+	}
+
+	userID := parsedToken.Subject
 	if userID == "" {
 		http.Error(w, "missing user_id", http.StatusBadRequest)
 		h.logger.Warn("missing required websocket query param",

@@ -1,22 +1,17 @@
-create table users (
+-- +goose Up
+create table if not exists users (
     id uuid primary key,
     username text unique not null,
     created_at timestamp default now()
 );
 
-create table messages (
+create table if not exists messages (
     id uuid primary key,
     sender_id uuid,
     receiver_id uuid,
     body text,
     created_at timestamp default now()
 );
-
-alter table messages
-add column if not exists chat_id uuid;
-
-create index if not exists messages_chat_id_idx
-on messages(chat_id);
 
 create table if not exists chats (
     id uuid primary key,
@@ -29,11 +24,8 @@ create table if not exists chat_participants (
     primary key (chat_id, user_id)
 );
 
-create index if not exists messages_chat_created_idx
-on messages(chat_id, created_at desc);
-
-create index if not exists chat_participants_user_idx
-on chat_participants(user_id);
-
-create index if not exists chat_participants_chat_idx
-on chat_participants(chat_id);
+-- +goose Down
+drop table if exists chat_participants;
+drop table if exists chats;
+drop table if exists messages;
+drop table if exists users;

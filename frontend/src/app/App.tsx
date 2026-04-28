@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { AuthForm } from "@/features/auth"
 import { ChatPage } from "@/pages/chat-page"
 import type { User } from "@/entities/user"
+import { STORAGE_USER_KEY } from "@/shared/config/storage"
 
 // App управляет верхнеуровневым состоянием авторизации и маршрутом на страницу чата.
 export default function App() {
@@ -9,15 +10,16 @@ export default function App() {
 
   // handleLogout очищает локальную сессию и возвращает пользователя на экран входа.
   function handleLogout() {
-    localStorage.clear()
+    localStorage.removeItem(STORAGE_USER_KEY)
     setUser(null)
   }
 
   // При старте приложения восстанавливаем сохраненного пользователя из localStorage.
   useEffect(() => {
-    const saved = localStorage.getItem("user")
+    const saved = localStorage.getItem(STORAGE_USER_KEY)
     if (saved) {
-      setUser(JSON.parse(saved))
+      const parsed = JSON.parse(saved)
+      setUser(parsed)
     }
   }, [])
 

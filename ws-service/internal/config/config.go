@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -20,11 +22,17 @@ type Config struct {
 	KafkaGroupID       string
 	LogLevel           slog.Level
 	LoadedEnvFile      string
+	JWTSecret          string
+	JWTTTL             time.Duration
 }
 
 // Load загружает env, парсит LOG_LEVEL и валидирует обязательные значения.
 func Load() (Config, error) {
 	loadedEnvFile := loadDotEnv()
+	jwtTTLHours, err := strconv.Atoi(os.Getenv("JWT_TTL_HOURS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid JWT_TTL_HOURS: %w", err)
+	}
 
 	cfg := Config{
 		WSPort:             os.Getenv("WS_PORT"),
@@ -33,6 +41,8 @@ func Load() (Config, error) {
 		KafkaTopicSaved:    os.Getenv("KAFKA_TOPIC_MESSAGES_SAVED"),
 		KafkaGroupID:       os.Getenv("KAFKA_GROUP_ID"),
 		LoadedEnvFile:      loadedEnvFile,
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		JWTTTL:             time.Hour * time.Duration(jwtTTLHours),
 	}
 
 	brokersRaw := os.Getenv("KAFKA_BROKERS")

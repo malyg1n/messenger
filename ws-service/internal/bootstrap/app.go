@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"ws-service/auth"
 	"ws-service/internal/broker"
 	"ws-service/internal/cache"
 	"ws-service/internal/config"
@@ -65,7 +66,9 @@ func Build() (*App, error) {
 	participantStore := store.NewParticipantStore(db)
 	participantsService := service.NewParticipantsService(participantsCache, participantStore, logger)
 	hub := ws.NewHub(logger)
-	handler := ws.NewHandler(producer, hub, logger)
+	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
+	handler := ws.NewHandler(producer, hub, logger, jwtSvc)
+
 	wsConsumer := ws.NewConsumer(consumer, participantsService, hub, logger)
 
 	// Сервис публикует health/readiness-пробы и websocket-эндпоинт.

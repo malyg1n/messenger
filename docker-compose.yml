@@ -15,7 +15,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   kafka:
     image: redpandadata/redpanda:v24.1.2
@@ -93,6 +92,18 @@ services:
       - node_modules_cache:/app/node_modules
     ports:
       - "5173:5173"
+
+  migrations:
+    image: kukymbr/goose-docker:3.27.0
+    depends_on:
+      - postgres
+    volumes:
+      - ./db/migrations:/migrations
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: host=postgres port=5432 user=postgres password=postgres dbname=chat sslmode=disable
+      GOOSE_COMMAND: up
+    restart: "no"
 
 volumes:
   postgres_data:
