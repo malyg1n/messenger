@@ -42,7 +42,7 @@ async function getUsers(): Promise<User[]> {
 }
 
 // createDirectChat создает или возвращает существующий direct-чат.
-async function createDirectChat(userId: string, targetUserId: string) {
+async function createDirectChat(targetUserId: string) {
   const res = await fetch(API + "/chats/direct", {
     method: "POST",
     headers: {
@@ -50,7 +50,6 @@ async function createDirectChat(userId: string, targetUserId: string) {
       ...getAuthHeaders()
     },
     body: JSON.stringify({
-      user_id: userId,
       target_user_id: targetUserId
     })
   })
@@ -87,8 +86,8 @@ async function getMessages(chatId: string, limit = 50, before?: string) {
 }
 
 // getChats возвращает список чатов пользователя.
-async function getChats(userId: string): Promise<Chat[]> {
-  const res = await fetch(API + "/chats?user_id=" + userId, {
+async function getChats(): Promise<Chat[]> {
+  const res = await fetch(API + "/chats", {
     headers: {
       ...getAuthHeaders()
     }

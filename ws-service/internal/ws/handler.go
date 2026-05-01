@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -105,20 +104,9 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 			)
 			continue
 		}
+		msg.SenderID = userID
 
 		if err := msg.Validate(); err != nil {
-			if errors.Is(err, model.ErrChatIDRequired) ||
-				errors.Is(err, model.ErrSenderIDRequired) ||
-				errors.Is(err, model.ErrBodyRequired) ||
-				errors.Is(err, model.ErrBodyTooLong) {
-				h.logger.Warn("invalid websocket message payload",
-					"component", "ws.handler",
-					"operation", "handle_ws.validate",
-					"user_id", userID,
-					"error", err,
-				)
-				continue
-			}
 			h.logger.Error("failed to validate websocket message",
 				"component", "ws.handler",
 				"operation", "handle_ws.validate",
@@ -129,7 +117,7 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		pubCtx, cancel := context.WithTimeout(r.Context(), kafkaPublishTimeout)
-		werr := h.producer.WriteMessage(pubCtx, []byte(msg.ChatID), payload)
+		werr := h.producer.WriteMessage(pubCtx, []byte(msg.ChatID), msg)
 		cancel()
 		if werr != nil {
 			h.logger.Error("failed to publish message to kafka",

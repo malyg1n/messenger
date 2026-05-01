@@ -46,7 +46,7 @@ export default function UsersList({
   useEffect(() => {
     let isActive = true
 
-    api.getChats(currentUser.id).then(nextChats => {
+    api.getChats().then(nextChats => {
       if (!isActive) return
       setChats(nextChats)
     })
@@ -63,7 +63,7 @@ export default function UsersList({
 
   // startChatWithUser создает direct-чат и сразу выбирает его в интерфейсе.
   async function startChatWithUser(target: User) {
-    const res = await api.createDirectChat(currentUser.id, target.id)
+    const res = await api.createDirectChat(target.id)
     const newChat: Chat = {
       chat_id: res.chat_id,
       title: target.username,

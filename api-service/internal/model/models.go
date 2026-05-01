@@ -10,7 +10,6 @@ type User struct {
 }
 
 type CreateChatRequest struct {
-	UserID       string `json:"user_id"`
 	TargetUserID string `json:"target_user_id"`
 }
 

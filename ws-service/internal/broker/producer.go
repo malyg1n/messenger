@@ -2,14 +2,16 @@ package broker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"ws-service/internal/model"
 
 	"github.com/segmentio/kafka-go"
 )
 
 // Producer задает контракт Kafka-producer для ws-service.
 type Producer interface {
-	WriteMessage(ctx context.Context, key []byte, value []byte) error
+	WriteMessage(ctx context.Context, key []byte, msg model.ChatMessage) error
 	Ready(ctx context.Context) error
 	Close() error
 }
@@ -33,8 +35,12 @@ func NewWriterProducer(brokers []string, topic string) *WriterProducer {
 }
 
 // WriteMessage публикует одно сообщение в Kafka.
-func (p *WriterProducer) WriteMessage(ctx context.Context, key []byte, value []byte) error {
-	err := p.writer.WriteMessages(ctx, kafka.Message{
+func (p *WriterProducer) WriteMessage(ctx context.Context, key []byte, msg model.ChatMessage) error {
+	value, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal message: %w", err)
+	}
+	err = p.writer.WriteMessages(ctx, kafka.Message{
 		Key:   key,
 		Value: value,
 	})

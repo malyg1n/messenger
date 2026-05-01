@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import type { Chat } from "@/entities/chat"
-import type { ChatMessage } from "@/entities/message"
+import type { ChatMessage, ViewMessage, LastMessageOverride } from "@/entities/message/model/types"
 import { UsersList } from "@/entities/user"
 import type { User } from "@/entities/user"
 import api from "@/shared/api/client"
@@ -12,20 +12,8 @@ type Props = {
   onLogout: () => void
 }
 
-type ViewMessage = {
-  text: string
-  isMe: boolean
-  timestamp: string
-  createdAtMs: number,
-  createdAt: string
-}
-
-type LastMessageOverride = {
-  last_message: string
-  last_message_at: string
-}
-
 const PAGE_SIZE = 50
+const DELIVERY_TIMEOUT_MS = 10000
 
 // ChatWidget — основной UI чата: список диалогов, история и отправка сообщений.
 export default function ChatWidget({ user, onLogout }: Props) {
@@ -46,6 +34,7 @@ export default function ChatWidget({ user, onLogout }: Props) {
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
   const reconnectTimeoutRef = useRef<number | null>(null)
   const reconnectAttemptRef = useRef(0)
+  const deliveryTimeoutsRef = useRef<Record<string, number>>({})
 
   const connectionStatusLabel: Record<"connecting" | "connected" | "disconnected", string> = {
     connecting: "Подключение",
@@ -80,14 +69,20 @@ export default function ChatWidget({ user, onLogout }: Props) {
   }
 
   // toViewMessages конвертирует API-модель в формат отображения.
-  function toViewMessages(history: { sender_id: string; body: string; created_at?: string }[], chat: Chat) {
+  function toViewMessages(
+    history: { sender_id: string; body: string; created_at?: string }[],
+    chat: Chat
+  ): ViewMessage[] {
     return history
-      .map(m => ({
+      .map<ViewMessage>(m => ({
+        body: m.body,
         text: m.sender_id === user.id ? "me: " + m.body : chat.title + ": " + m.body,
         isMe: m.sender_id === user.id,
         timestamp: formatTimestamp(m.created_at),
         createdAtMs: toCreatedAtMs(m.created_at),
-        createdAt: m.created_at ?? new Date().toISOString()
+        createdAt: m.created_at ?? new Date().toISOString(),
+        status: "saved",
+        clientMessageId: undefined
       }))
       .sort((a, b) => a.createdAtMs - b.createdAtMs)
   }
@@ -159,10 +154,34 @@ export default function ChatWidget({ user, onLogout }: Props) {
       setSocket(ws)
 
       ws.onmessage = e => {
-        const m = JSON.parse(e.data) as { sender_id: string; chat_id: string; body: string; created_at?: string }
+        const m = JSON.parse(e.data) as { sender_id: string; chat_id: string; body: string; created_at?: string, client_message_id?: string }
         const createdAt = m.created_at ?? new Date().toISOString()
         const isIncoming = m.sender_id !== user.id
         const isActiveChatMessage = m.chat_id === selectedChatIdRef.current
+        if (!isIncoming && m.client_message_id) {
+          const pendingTimeout = deliveryTimeoutsRef.current[m.client_message_id]
+          if (pendingTimeout) {
+            window.clearTimeout(pendingTimeout)
+            delete deliveryTimeoutsRef.current[m.client_message_id]
+          }
+          setMessages(prev => {
+            let isUpdated = false
+            const next = prev.map(message => {
+              if (isUpdated || !message.isMe || message.clientMessageId !== m.client_message_id) {
+                return message
+              }
+              isUpdated = true
+              return {
+                ...message,
+                status: "saved" as const,
+                createdAt: createdAt,
+                createdAtMs: toCreatedAtMs(createdAt),
+                timestamp: formatTimestamp(createdAt)
+              }
+            })
+            return isUpdated ? next : prev
+          })
+        }
         if (m.chat_id) {
           setLastMessageOverrides(prev => ({
             ...prev,
@@ -180,11 +199,13 @@ export default function ChatWidget({ user, onLogout }: Props) {
           setMessages(prev => [
             ...prev,
             {
+              body: m.body,
               text: "them: " + m.body,
               isMe: false,
               timestamp: formatTimestamp(createdAt),
               createdAtMs: toCreatedAtMs(createdAt),
-              createdAt: createdAt
+              createdAt: createdAt,
+              status: "saved"
             }
           ])
           scrollToBottom()
@@ -221,6 +242,8 @@ export default function ChatWidget({ user, onLogout }: Props) {
       isUnmounted = true
       reconnectAttemptRef.current = 0
       clearReconnectTimeout()
+      Object.values(deliveryTimeoutsRef.current).forEach(timeoutId => window.clearTimeout(timeoutId))
+      deliveryTimeoutsRef.current = {}
       if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
         ws.close()
       }
@@ -244,16 +267,37 @@ export default function ChatWidget({ user, onLogout }: Props) {
   }, [])
 
   // send отправляет сообщение в websocket и сразу отражает его в интерфейсе.
+  function scheduleDeliveryTimeout(clientMessageId: string) {
+    deliveryTimeoutsRef.current[clientMessageId] = window.setTimeout(() => {
+      setMessages(prev => {
+        let isUpdated = false
+        const next = prev.map(message => {
+          if (isUpdated || message.clientMessageId !== clientMessageId || message.status !== "pending") {
+            return message
+          }
+          isUpdated = true
+          return {
+            ...message,
+            status: "failed" as const
+          }
+        })
+        return isUpdated ? next : prev
+      })
+      delete deliveryTimeoutsRef.current[clientMessageId]
+    }, DELIVERY_TIMEOUT_MS)
+  }
+
   function send() {
     if (!socket || !chatId || !text.trim()) return
 
     const msg: ChatMessage = {
       chat_id: chatId,
-      sender_id: user.id,
+      client_message_id: crypto.randomUUID(),
       body: text
     }
 
     socket.send(JSON.stringify(msg))
+    scheduleDeliveryTimeout(msg.client_message_id)
     setChatsRefreshToken(prev => prev + 1)
     setLastMessageOverrides(prev => ({
       ...prev,
@@ -267,16 +311,64 @@ export default function ChatWidget({ user, onLogout }: Props) {
     setMessages(prev => [
       ...prev,
       {
+        body: text,
         text: "me: " + text,
         isMe: true,
         timestamp: formatTimestamp(),
         createdAtMs: Date.now(),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        status: "pending",
+        clientMessageId: msg.client_message_id
       }
     ])
 
     setText("")
     scrollToBottom()
+  }
+
+  function retryMessage(messageIndex: number) {
+    if (!socket || socket.readyState !== WebSocket.OPEN || !chatId) return
+    const target = messages[messageIndex]
+    if (!target || !target.isMe || target.status !== "failed") return
+
+    const retryClientMessageId = target.clientMessageId ?? crypto.randomUUID()
+    const pendingTimeout = deliveryTimeoutsRef.current[retryClientMessageId]
+    if (pendingTimeout) {
+      window.clearTimeout(pendingTimeout)
+      delete deliveryTimeoutsRef.current[retryClientMessageId]
+    }
+
+    const retryCreatedAt = new Date().toISOString()
+    const retryPayload: ChatMessage = {
+      chat_id: chatId,
+      client_message_id: retryClientMessageId,
+      body: target.body
+    }
+
+    socket.send(JSON.stringify(retryPayload))
+    scheduleDeliveryTimeout(retryClientMessageId)
+    setChatsRefreshToken(prev => prev + 1)
+    setLastMessageOverrides(prev => ({
+      ...prev,
+      [chatId]: {
+        last_message: target.body,
+        last_message_at: retryCreatedAt
+      }
+    }))
+    setMessages(prev =>
+      prev.map((message, index) =>
+        index === messageIndex
+          ? {
+            ...message,
+            status: "pending",
+            clientMessageId: retryClientMessageId,
+            createdAt: retryCreatedAt,
+            createdAtMs: toCreatedAtMs(retryCreatedAt),
+            timestamp: formatTimestamp(retryCreatedAt)
+          }
+          : message
+      )
+    )
   }
 
   // selectChat переключает активный чат и загружает его историю.
@@ -347,9 +439,16 @@ export default function ChatWidget({ user, onLogout }: Props) {
             <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
               {messages.map((m, i) => (
                 <div key={i} className={`message-row ${m.isMe ? "message-row-me" : "message-row-them"}`}>
-                  <div className={`message-bubble ${m.isMe ? "message-bubble-me" : "message-bubble-them"}`}>
+                  <div
+                    className={`message-bubble ${m.isMe ? "message-bubble-me" : "message-bubble-them"} ${m.status === "failed" ? "message-bubble-failed" : ""}`}
+                  >
                     <div>{m.text}</div>
                     <div className="message-meta">{m.timestamp}</div>
+                    {m.isMe && m.status === "failed" ? (
+                      <button className="message-retry-btn" onClick={() => retryMessage(i)}>
+                        Повторить
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ))}

@@ -343,6 +343,30 @@ body {
   text-align: right;
 }
 
+.message-bubble-failed {
+  color: #dc2626;
+}
+
+.message-bubble-failed .message-meta {
+  color: #dc2626;
+}
+
+.message-retry-btn {
+  margin-top: 6px;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.message-retry-btn:hover {
+  opacity: 0.8;
+}
+
 .chat-input-row {
   display: flex;
   gap: 10px;
