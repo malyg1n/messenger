@@ -15,6 +15,7 @@ import (
 // Config описывает обязательные настройки api-service из окружения.
 type Config struct {
 	APIPort           string
+	RedisAddr         string
 	PostgresDSN       string
 	CORSAllowedOrigin string
 	LogLevel          slog.Level
@@ -38,6 +39,7 @@ func Load() (Config, error) {
 		LoadedEnvFile:     loadedEnvFile,
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		JWTTTL:            time.Hour * time.Duration(jwtTTLHours),
+		RedisAddr:         os.Getenv("REDIS_ADDR"),
 	}
 
 	level, err := parseLogLevel(os.Getenv("LOG_LEVEL"))

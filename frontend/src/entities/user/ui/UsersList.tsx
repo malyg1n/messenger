@@ -9,6 +9,8 @@ type Props = {
   selectedChatId?: string
   refreshToken?: number
   lastMessageOverrides?: Record<string, { last_message: string; last_message_at: string }>
+  connectionStatus: "connecting" | "connected" | "disconnected"
+  connectionStatusLabel: string
 }
 
 // UsersList показывает существующие чаты и список пользователей для старта нового диалога.
@@ -17,7 +19,9 @@ export default function UsersList({
   onSelect,
   selectedChatId,
   refreshToken = 0,
-  lastMessageOverrides = {}
+  lastMessageOverrides = {},
+  connectionStatus,
+  connectionStatusLabel
 }: Props) {
   const [chats, setChats] = useState<Chat[]>([])
   const [users, setUsers] = useState<User[]>([])
@@ -104,33 +108,46 @@ export default function UsersList({
 
   return (
     <div className="chat-sidebar">
-      <div className="sidebar-title">Чаты</div>
+      <div className="chat-sidebar-content">
+        <div className="sidebar-title">Чаты</div>
 
-      {chatsForRender.map(chat => (
-        <div
-          key={chat.chat_id}
-          onClick={() => onSelect(chat)}
-          className={`chat-item ${selectedChatId === chat.chat_id ? "chat-item-active" : ""}`}
-        >
-          <div className="chat-item-head">
-            <div className="chat-item-name">{chat.title}</div>
-            <div className="chat-item-time">{formatChatTime(chat.last_message_at)}</div>
+        {chatsForRender.map(chat => (
+          <div
+            key={chat.chat_id}
+            onClick={() => onSelect(chat)}
+            className={`chat-item ${selectedChatId === chat.chat_id ? "chat-item-active" : ""}`}
+          >
+            <div className="chat-item-head">
+              <div className="chat-item-name">{chat.title}</div>
+              <div className="chat-item-time">{formatChatTime(chat.last_message_at)}</div>
+            </div>
+            <div className="chat-item-preview">{chat.last_message || "Нет сообщений"}</div>
           </div>
-          <div className="chat-item-preview">{chat.last_message || "Нет сообщений"}</div>
-        </div>
-      ))}
+        ))}
 
-      <div className="sidebar-subtitle">Новый чат</div>
-      {usersWithoutChats.map(target => (
-        <div
-          key={target.id}
-          onClick={() => startChatWithUser(target)}
-          className="chat-item chat-item-new"
-        >
-          <div className="chat-item-name">{target.username}</div>
-          <div className="chat-item-preview">создать диалог</div>
-        </div>
-      ))}
+        <div className="sidebar-subtitle">Новый чат</div>
+        {usersWithoutChats.map(target => (
+          <div
+            key={target.id}
+            onClick={() => startChatWithUser(target)}
+            className="chat-item chat-item-new"
+          >
+            <div className="chat-item-name">{target.username}</div>
+            <div className="chat-item-preview">создать диалог</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="chat-sidebar-footer">
+        <div className="chat-sidebar-user">Вы: {currentUser.username}</div>
+        <span className="chat-connection-status">
+          <span
+            className={`chat-connection-dot chat-connection-dot-${connectionStatus}`}
+            aria-hidden="true"
+          />
+          {connectionStatusLabel}
+        </span>
+      </div>
     </div>
   )
 }

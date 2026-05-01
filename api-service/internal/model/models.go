@@ -25,7 +25,13 @@ type Message struct {
 
 type ChatListItem struct {
 	ChatID        string `json:"chat_id"`
+	OtherUserID   string `json:"other_user_id"`
 	Title         string `json:"title"`
 	LastMessage   string `json:"last_message"`
 	LastMessageAt string `json:"last_message_at"`
+}
+
+type IsOnlineResponse struct {
+	IsOnline bool   `json:"is_online"`
+	UserID   string `json:"user_id"`
 }

@@ -64,10 +64,11 @@ func Build() (*App, error) {
 	// кому доставлять каждое сообщение чата в реальном времени.
 	participantsCache := cache.NewParticipantsCache()
 	participantStore := store.NewParticipantStore(db)
+	presenceStore := store.NewPresenceStore(cfg.RedisAddr, cfg.PresenceTTL)
 	participantsService := service.NewParticipantsService(participantsCache, participantStore, logger)
 	hub := ws.NewHub(logger)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
-	handler := ws.NewHandler(producer, hub, logger, jwtSvc)
+	handler := ws.NewHandler(producer, hub, logger, jwtSvc, presenceStore)
 
 	wsConsumer := ws.NewConsumer(consumer, participantsService, hub, logger)
 

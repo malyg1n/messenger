@@ -46,6 +46,19 @@ services:
       retries: 15
       start_period: 20s
 
+  redis:
+    image: redis:7.4.1-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
   api:
     build: ./api-service
     volumes:
@@ -55,6 +68,8 @@ services:
       - "8081:8081"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   ws:
@@ -68,6 +83,8 @@ services:
       - "8080:8080"
     depends_on:
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   message:
@@ -83,6 +100,8 @@ services:
       kafka:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
@@ -108,5 +127,6 @@ services:
 volumes:
   postgres_data:
   kafka_data:
+  redis_data:
   node_modules_cache:
   go_mod_cache:

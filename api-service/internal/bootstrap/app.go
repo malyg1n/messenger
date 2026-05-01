@@ -14,6 +14,7 @@ import (
 	httpHandlers "api-service/internal/http/handlers"
 	"api-service/internal/repository"
 	"api-service/internal/service"
+	"api-service/internal/store"
 	"api-service/pkg/auth"
 
 	_ "github.com/lib/pq"
@@ -25,6 +26,7 @@ type App struct {
 	Logger     *slog.Logger
 	DB         *sql.DB
 	HTTPServer *http.Server
+	PresenceStore *store.PresenceStore
 }
 
 // Build собирает объект приложения и связывает конфиг, БД, сервисы и HTTP-роуты.
@@ -54,8 +56,9 @@ func Build() (*App, error) {
 	chatSvc := service.NewChatService(chatRepo, logger)
 	messageSvc := service.NewMessageService(messageRepo)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
+	presenceStore := store.NewPresenceStore(cfg.RedisAddr)
 
-	handler := httpHandlers.New(authSvc, userSvc, chatSvc, messageSvc, logger, jwtSvc)
+	handler := httpHandlers.New(authSvc, userSvc, chatSvc, messageSvc, logger, jwtSvc, presenceStore)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ready", readyHandler(db))

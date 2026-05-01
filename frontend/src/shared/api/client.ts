@@ -1,4 +1,5 @@
 import type { Chat } from "@/entities/chat"
+import { IsOnlineResponse } from "@/entities/chat/model/types"
 import type { User } from "@/entities/user"
 import { AuthResponse } from "@/entities/user/model/types"
 import { getAuthToken } from "@/shared/config/storage"
@@ -95,11 +96,21 @@ async function getChats(): Promise<Chat[]> {
   return res.json()
 }
 
+async function isOnline(userId: string): Promise<IsOnlineResponse> {
+  const res = await fetch(API + "/presence?user_id=" + userId, {
+    headers: {
+      ...getAuthHeaders()
+    }
+  })
+  return res.json()
+}
+
 export default {
   register,
   getUsers,
   createDirectChat,
   login,
   getMessages,
-  getChats
+  getChats,
+  isOnline
 }

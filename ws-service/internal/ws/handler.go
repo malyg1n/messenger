@@ -15,10 +15,18 @@ import (
 )
 
 const kafkaPublishTimeout = 10 * time.Second
+const presenceRefreshInterval = 10 * time.Second
+
+type presenceTracker interface {
+	SetOnline(ctx context.Context, userID string) error
+	RefreshOnline(ctx context.Context, userID string) error
+	SetOffline(ctx context.Context, userID string) error
+}
 
 // Handler обслуживает websocket-подключения и отправляет сообщения в Kafka.
 type Handler struct {
 	producer broker.Producer
+	presence presenceTracker
 	hub      *Hub
 	logger   *slog.Logger
 	upgrader websocket.Upgrader
@@ -26,9 +34,10 @@ type Handler struct {
 }
 
 // NewHandler создает websocket-handler с доступом к Kafka producer и Hub.
-func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger, jwtSvc *auth.JWTService) *Handler {
+func NewHandler(producer broker.Producer, hub *Hub, logger *slog.Logger, jwtSvc *auth.JWTService, presence presenceTracker) *Handler {
 	return &Handler{
 		producer: producer,
+		presence: presence,
 		hub:      hub,
 		logger:   logger,
 		upgrader: websocket.Upgrader{
@@ -76,6 +85,30 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(16 * 1024) // 16KB
 	defer conn.Close()
+	if h.presence != nil {
+		if err := h.presence.SetOnline(r.Context(), userID); err != nil {
+			h.logger.Warn("failed to set user presence online",
+				"component", "ws.handler",
+				"operation", "handle_ws.presence_online",
+				"user_id", userID,
+				"error", err,
+			)
+		}
+		defer func() {
+			if err := h.presence.SetOffline(context.Background(), userID); err != nil {
+				h.logger.Warn("failed to set user presence offline",
+					"component", "ws.handler",
+					"operation", "handle_ws.presence_offline",
+					"user_id", userID,
+					"error", err,
+				)
+			}
+		}()
+
+		stopRefresh := make(chan struct{})
+		defer close(stopRefresh)
+		go h.refreshPresenceLoop(stopRefresh, userID)
+	}
 
 	h.hub.Register(userID, conn)
 	defer h.hub.Unregister(userID)
@@ -128,6 +161,27 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 				"error", werr,
 			)
 			continue
+		}
+	}
+}
+
+func (h *Handler) refreshPresenceLoop(stop <-chan struct{}, userID string) {
+	ticker := time.NewTicker(presenceRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := h.presence.RefreshOnline(context.Background(), userID); err != nil {
+				h.logger.Warn("failed to refresh user presence",
+					"component", "ws.handler",
+					"operation", "handle_ws.presence_refresh",
+					"user_id", userID,
+					"error", err,
+				)
+			}
 		}
 	}
 }

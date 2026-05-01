@@ -32,6 +32,7 @@ export default function ChatWidget({ user, onLogout }: Props) {
   const selectedChatRef = useRef<Chat | null>(null)
   const selectedChatIdRef = useRef<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting")
+  const [peerOnlineStatus, setPeerOnlineStatus] = useState<"idle" | "loading" | "online" | "offline">("idle")
   const reconnectTimeoutRef = useRef<number | null>(null)
   const reconnectAttemptRef = useRef(0)
   const deliveryTimeoutsRef = useRef<Record<string, number>>({})
@@ -134,6 +135,38 @@ export default function ChatWidget({ user, onLogout }: Props) {
     }
     return new WebSocket(`${wsUrl}?${params.toString()}`)
   }
+
+  useEffect(() => {
+    const peerUserId = selectedChat?.other_user_id
+    if (!peerUserId) {
+      setPeerOnlineStatus("idle")
+      return
+    }
+
+    let isActive = true
+    setPeerOnlineStatus("loading")
+
+    const updatePresence = async () => {
+      try {
+        const presence = await api.isOnline(peerUserId)
+        if (!isActive) return
+        setPeerOnlineStatus(presence.is_online ? "online" : "offline")
+      } catch {
+        if (!isActive) return
+        setPeerOnlineStatus("offline")
+      }
+    }
+
+    void updatePresence()
+    const intervalId = window.setInterval(() => {
+      void updatePresence()
+    }, 5000)
+
+    return () => {
+      isActive = false
+      window.clearInterval(intervalId)
+    }
+  }, [selectedChat?.other_user_id])
 
   useEffect(() => {
     // Держим одно websocket-подключение на пользователя и переподключаемся при обрыве.
@@ -412,6 +445,8 @@ export default function ChatWidget({ user, onLogout }: Props) {
         selectedChatId={selectedChat?.chat_id}
         refreshToken={chatsRefreshToken}
         lastMessageOverrides={lastMessageOverrides}
+        connectionStatus={connectionStatus}
+        connectionStatusLabel={connectionStatusLabel[connectionStatus]}
       />
 
       <div className="chat-main">
@@ -423,14 +458,27 @@ export default function ChatWidget({ user, onLogout }: Props) {
             </button>
           </div>
           <div className="chat-topbar-subtitle">
-            Вы: {user.username}
-            <span className="chat-connection-status">
-              <span
-                className={`chat-connection-dot chat-connection-dot-${connectionStatus}`}
-                aria-hidden="true"
-              />
-              {connectionStatusLabel[connectionStatus]}
-            </span>
+            {selectedChat ? (
+              <span className="chat-connection-status">
+                <span
+                  className={`chat-connection-dot ${
+                    peerOnlineStatus === "online"
+                      ? "chat-connection-dot-connected"
+                      : peerOnlineStatus === "offline"
+                        ? "chat-connection-dot-disconnected"
+                        : "chat-connection-dot-connecting"
+                  }`}
+                  aria-hidden="true"
+                />
+                {peerOnlineStatus === "online"
+                  ? "В сети"
+                  : peerOnlineStatus === "offline"
+                    ? "Не в сети"
+                    : "Проверка статуса"}
+              </span>
+            ) : (
+              "Выберите чат, чтобы увидеть статус"
+            )}
           </div>
         </div>
 

@@ -20,6 +20,8 @@ type Config struct {
 	KafkaTopicIncoming string
 	KafkaTopicSaved    string
 	KafkaGroupID       string
+	RedisAddr          string
+	PresenceTTL        time.Duration
 	LogLevel           slog.Level
 	LoadedEnvFile      string
 	JWTSecret          string
@@ -40,10 +42,16 @@ func Load() (Config, error) {
 		KafkaTopicIncoming: os.Getenv("KAFKA_TOPIC_MESSAGES_INCOMING"),
 		KafkaTopicSaved:    os.Getenv("KAFKA_TOPIC_MESSAGES_SAVED"),
 		KafkaGroupID:       os.Getenv("KAFKA_GROUP_ID"),
+		RedisAddr:          os.Getenv("REDIS_ADDR"),
 		LoadedEnvFile:      loadedEnvFile,
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 		JWTTTL:             time.Hour * time.Duration(jwtTTLHours),
 	}
+	presenceTTLSeconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("PRESENCE_TTL_SECONDS")))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid PRESENCE_TTL_SECONDS: %w", err)
+	}
+	cfg.PresenceTTL = time.Duration(presenceTTLSeconds) * time.Second
 
 	brokersRaw := os.Getenv("KAFKA_BROKERS")
 	if brokersRaw != "" {
@@ -121,6 +129,9 @@ func validate(cfg Config) error {
 	}
 	if cfg.KafkaGroupID == "" {
 		missing = append(missing, "KAFKA_GROUP_ID")
+	}
+	if cfg.RedisAddr == "" {
+		missing = append(missing, "REDIS_ADDR")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))

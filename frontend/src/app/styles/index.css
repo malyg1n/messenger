@@ -118,9 +118,28 @@ body {
   width: 320px;
   border-right: 1px solid #e2e8f0;
   background: #f7f9fc;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-sidebar-content {
+  flex: 1;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(100, 116, 139, 0.25) transparent;
+}
+
+.chat-sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #f7f9fc;
+}
+
+.chat-sidebar-user {
+  font-size: 13px;
+  color: #475569;
+  margin-bottom: 6px;
 }
 
 .sidebar-title {
@@ -231,6 +250,10 @@ body {
   gap: 6px;
 }
 
+.chat-sidebar-footer .chat-connection-status {
+  margin-left: 0;
+}
+
 .chat-connection-dot {
   width: 8px;
   height: 8px;
@@ -277,23 +300,23 @@ body {
   scrollbar-color: rgba(100, 116, 139, 0.25) transparent;
 }
 
-.chat-sidebar::-webkit-scrollbar,
+.chat-sidebar-content::-webkit-scrollbar,
 .messages::-webkit-scrollbar {
   width: 6px;
 }
 
-.chat-sidebar::-webkit-scrollbar-track,
+.chat-sidebar-content::-webkit-scrollbar-track,
 .messages::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.chat-sidebar::-webkit-scrollbar-thumb,
+.chat-sidebar-content::-webkit-scrollbar-thumb,
 .messages::-webkit-scrollbar-thumb {
   background: rgba(100, 116, 139, 0.22);
   border-radius: 999px;
 }
 
-.chat-sidebar::-webkit-scrollbar-thumb:hover,
+.chat-sidebar-content::-webkit-scrollbar-thumb:hover,
 .messages::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.35);
 }

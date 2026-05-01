@@ -11,28 +11,39 @@ import (
 	"api-service/internal/http/dto"
 	"api-service/internal/model"
 	"api-service/internal/service"
+	"api-service/internal/store"
 	"api-service/pkg/auth"
 )
 
 // Handler объединяет HTTP-обработчики и доступ к бизнес-сервисам.
 type Handler struct {
-	authSvc    *service.AuthService
-	userSvc    *service.UserService
-	chatSvc    *service.ChatService
-	messageSvc *service.MessageService
-	logger     *slog.Logger
-	jwtSvc     *auth.JWTService
+	authSvc       *service.AuthService
+	userSvc       *service.UserService
+	chatSvc       *service.ChatService
+	messageSvc    *service.MessageService
+	logger        *slog.Logger
+	jwtSvc        *auth.JWTService
+	presenceStore *store.PresenceStore
 }
 
 // New создает HTTP-слой и внедряет зависимости сервисного уровня.
-func New(authSvc *service.AuthService, userSvc *service.UserService, chatSvc *service.ChatService, messageSvc *service.MessageService, logger *slog.Logger, jwtSvc *auth.JWTService) *Handler {
+func New(
+	authSvc *service.AuthService,
+	userSvc *service.UserService,
+	chatSvc *service.ChatService,
+	messageSvc *service.MessageService,
+	logger *slog.Logger,
+	jwtSvc *auth.JWTService,
+	presenceStore *store.PresenceStore,
+) *Handler {
 	return &Handler{
-		authSvc:    authSvc,
-		userSvc:    userSvc,
-		chatSvc:    chatSvc,
-		messageSvc: messageSvc,
-		logger:     logger,
-		jwtSvc:     jwtSvc,
+		authSvc:       authSvc,
+		userSvc:       userSvc,
+		chatSvc:       chatSvc,
+		messageSvc:    messageSvc,
+		logger:        logger,
+		jwtSvc:        jwtSvc,
+		presenceStore: presenceStore,
 	}
 }
 
@@ -44,6 +55,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/chats/direct", h.createDirectChat)
 	mux.HandleFunc("/messages", h.listMessages)
 	mux.HandleFunc("/chats", h.listChats)
+	mux.HandleFunc("/presence", h.isOnline)
 }
 
 // register создает нового пользователя по username.
@@ -223,6 +235,26 @@ func (h *Handler) currentUserIDFromToken(r *http.Request) (string, error) {
 	}
 
 	return claims.Subject, nil
+}
+
+func (h *Handler) isOnline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
+	isOnline, err := h.presenceStore.IsOnline(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, model.IsOnlineResponse{IsOnline: isOnline, UserID: userID}, h.logger)
 }
 
 // writeJSON сериализует значение и записывает JSON-ответ.

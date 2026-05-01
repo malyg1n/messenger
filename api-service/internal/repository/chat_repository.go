@@ -58,6 +58,7 @@ func (r *ChatRepository) ListForUser(ctx context.Context, userID string) ([]mode
 		select
 			c.id as chat_id,
 			u.username as title,
+			other_p.user_id as other_user_id,
 			coalesce(m.body, '') as last_message,
 			coalesce(m.created_at::text, '') as last_message_at
 		from chats c
@@ -82,7 +83,7 @@ func (r *ChatRepository) ListForUser(ctx context.Context, userID string) ([]mode
 	chats := make([]model.ChatListItem, 0)
 	for rows.Next() {
 		var item model.ChatListItem
-		if err := rows.Scan(&item.ChatID, &item.Title, &item.LastMessage, &item.LastMessageAt); err != nil {
+		if err := rows.Scan(&item.ChatID, &item.Title, &item.OtherUserID, &item.LastMessage, &item.LastMessageAt); err != nil {
 			return nil, fmt.Errorf("list chats scan: %w", err)
 		}
 		chats = append(chats, item)
