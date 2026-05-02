@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -109,6 +110,15 @@ func (h *Handler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		defer close(stopRefresh)
 		go h.refreshPresenceLoop(stopRefresh, userID)
 	}
+
+	hostname, _ := os.Hostname()
+	h.logger.Info("websocket connection established",
+		"component", "ws.handler",
+		"operation", "handle_ws.connection_established",
+		"user_id", userID,
+		"hostname", hostname,
+	)
+	
 
 	h.hub.Register(userID, conn)
 	defer h.hub.Unregister(userID)

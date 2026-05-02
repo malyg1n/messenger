@@ -79,8 +79,8 @@ services:
     volumes:
       - ./ws-service:/app
       - go_mod_cache:/go/pkg/mod
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     depends_on:
       kafka:
         condition: service_healthy
@@ -123,6 +123,15 @@ services:
       GOOSE_DBSTRING: host=postgres port=5432 user=postgres password=postgres dbname=chat sslmode=disable
       GOOSE_COMMAND: up
     restart: "no"
+
+  ws-lb:
+    image: nginx:alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx/ws.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - ws
 
 volumes:
   postgres_data:
