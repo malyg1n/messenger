@@ -8,33 +8,31 @@ import (
 
 	"ws-service/internal/broker"
 	"ws-service/internal/model"
-	"ws-service/internal/service"
+	"ws-service/internal/pubsub"
 )
 
 // Consumer читает сообщения из Kafka и отправляет их онлайн-участникам чата.
 type Consumer struct {
 	brokerConsumer broker.Consumer
-	participants   *service.ParticipantsService
-	hub            *Hub
 	logger         *slog.Logger
+	publisher      *pubsub.Publisher
 }
 
 // NewConsumer создает обработчик входящего Kafka-потока для websocket-рассылки.
 func NewConsumer(
 	brokerConsumer broker.Consumer,
-	participants *service.ParticipantsService,
-	hub *Hub,
 	logger *slog.Logger,
+	publisher *pubsub.Publisher,
 ) *Consumer {
 	return &Consumer{
 		brokerConsumer: brokerConsumer,
-		participants:   participants,
-		hub:            hub,
 		logger:         logger,
+		publisher:      publisher,
 	}
 }
 
-// Run запускает непрерывный цикл: decode -> resolve participants -> broadcast.
+// Run запускает непрерывный цикл: read message -> decode -> publish to redis
+// then subscribe to redis channel and broadcast to websocket clients
 func (c *Consumer) Run(ctx context.Context) {
 	for {
 		select {
@@ -67,18 +65,6 @@ func (c *Consumer) Run(ctx context.Context) {
 			continue
 		}
 
-		// Получаем состав чата и рассылаем сообщение только его участникам.
-		userIDs, err := c.participants.GetByChatID(ctx, chatMessage.ChatID)
-		if err != nil {
-			c.logger.Error("failed to load chat participants",
-				"component", "ws.consumer",
-				"operation", "run.load_participants",
-				"chat_id", chatMessage.ChatID,
-				"error", err,
-			)
-			continue
-		}
-
-		c.hub.Broadcast(userIDs, chatMessage)
+		c.publisher.Publish(ctx, chatMessage)
 	}
 }

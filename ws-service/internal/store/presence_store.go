@@ -12,11 +12,9 @@ type PresenceStore struct {
 	ttl    time.Duration
 }
 
-func NewPresenceStore(addr string, ttl time.Duration) *PresenceStore {
+func NewPresenceStore(client *redis.Client, ttl time.Duration) *PresenceStore {
 	return &PresenceStore{
-		client: redis.NewClient(&redis.Options{
-			Addr: addr,
-		}),
+		client: client,
 		ttl: ttl,
 	}
 }

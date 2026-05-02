@@ -26,6 +26,7 @@ func main() {
 	defer stop()
 
 	go app.RunConsumer(rootCtx)
+	go app.RunSubscriber(rootCtx)
 
 	serverErrCh := make(chan error, 1)
 	go func() {

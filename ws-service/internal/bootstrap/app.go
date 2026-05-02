@@ -16,25 +16,32 @@ import (
 	"ws-service/internal/broker"
 	"ws-service/internal/cache"
 	"ws-service/internal/config"
+	"ws-service/internal/model"
+	"ws-service/internal/pubsub"
 	"ws-service/internal/service"
 	"ws-service/internal/store"
 	"ws-service/internal/ws"
 
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 // App хранит инфраструктурные зависимости ws-service.
 type App struct {
-	Config        config.Config
-	Logger        *slog.Logger
-	DB            *sql.DB
-	KafkaProducer broker.Producer
-	KafkaConsumer broker.Consumer
-	HTTPServer    *http.Server
-	WSConsumer    *ws.Consumer
-	Hub           *ws.Hub
+	Config              config.Config
+	Logger              *slog.Logger
+	DB                  *sql.DB
+	KafkaProducer       broker.Producer
+	KafkaConsumer       broker.Consumer
+	HTTPServer          *http.Server
+	WSConsumer          *ws.Consumer
+	Hub                 *ws.Hub
+	RedisClient         *redis.Client
+	ParticipantsService *service.ParticipantsService
 
 	shutdownOnce sync.Once
+	Publisher    *pubsub.Publisher
+	Subscriber   *pubsub.Subscriber
 }
 
 // Build собирает все зависимости ws-service:
@@ -56,6 +63,15 @@ func Build() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: cfg.RedisAddr,
+	})
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+
+	publisher := pubsub.NewPublisher(redisClient, logger)
+	subscriber := pubsub.NewSubscriber(redisClient, logger)
 
 	producer := broker.NewWriterProducer(cfg.KafkaBrokers, cfg.KafkaTopicIncoming)
 	consumer := broker.NewReaderConsumer(cfg.KafkaBrokers, cfg.KafkaTopicSaved, cfg.KafkaGroupID)
@@ -64,13 +80,13 @@ func Build() (*App, error) {
 	// кому доставлять каждое сообщение чата в реальном времени.
 	participantsCache := cache.NewParticipantsCache()
 	participantStore := store.NewParticipantStore(db)
-	presenceStore := store.NewPresenceStore(cfg.RedisAddr, cfg.PresenceTTL)
+	presenceStore := store.NewPresenceStore(redisClient, cfg.PresenceTTL)
 	participantsService := service.NewParticipantsService(participantsCache, participantStore, logger)
 	hub := ws.NewHub(logger)
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
 	handler := ws.NewHandler(producer, hub, logger, jwtSvc, presenceStore)
 
-	wsConsumer := ws.NewConsumer(consumer, participantsService, hub, logger)
+	wsConsumer := ws.NewConsumer(consumer, logger, publisher)
 
 	// Сервис публикует health/readiness-пробы и websocket-эндпоинт.
 	mux := http.NewServeMux()
@@ -84,20 +100,40 @@ func Build() (*App, error) {
 	}
 
 	return &App{
-		Config:        cfg,
-		Logger:        logger,
-		DB:            db,
-		KafkaProducer: producer,
-		KafkaConsumer: consumer,
-		HTTPServer:    server,
-		WSConsumer:    wsConsumer,
-		Hub:           hub,
+		Config:              cfg,
+		Logger:              logger,
+		DB:                  db,
+		KafkaProducer:       producer,
+		KafkaConsumer:       consumer,
+		HTTPServer:          server,
+		WSConsumer:          wsConsumer,
+		Hub:                 hub,
+		Publisher:           publisher,
+		RedisClient:         redisClient,
+		Subscriber:          subscriber,
+		ParticipantsService: participantsService,
 	}, nil
 }
 
 // RunConsumer запускает фоновую обработку сообщений из Kafka.
 func (a *App) RunConsumer(ctx context.Context) {
 	a.WSConsumer.Run(ctx)
+}
+
+func (a *App) RunSubscriber(ctx context.Context) {
+	a.Subscriber.Subscribe(ctx, func(message model.ChatMessage) {
+		a.handleRedisMessage(ctx, message)
+	})
+}
+
+func (a *App) handleRedisMessage(ctx context.Context, msg model.ChatMessage) {
+	userIDs, err := a.ParticipantsService.GetByChatID(ctx, msg.ChatID)
+	if err != nil {
+		a.Logger.Error("failed to get participants", "error", err)
+		return
+	}
+	a.Hub.Broadcast(userIDs, msg)
+
 }
 
 // Shutdown выполняет упорядоченное завершение: Hub, Kafka reader, Kafka writer, DB (идемпотентно).
